@@ -57,6 +57,7 @@
 ; ============================================================================
 
 Import "../core/GraphModel.rgr"
+Import "../core/EdgeRouter.rgr"
 Import "LayoutMemo.rgr"
 
 class LayeredLayout {
@@ -893,7 +894,18 @@ class LayeredLayout {
         this.buildLayerLists()
         def lc:int (this.layerCount())
         orderWork = 0
-        if (keepBest == false) {
+        ; A layout whose lines meet boxes at points along them — the boxes
+        ; that stand for groups — is not judged by counting crossings
+        ; between boxes: a line attaches at the member it goes to, and which
+        ; order of boxes draws without crossings depends on where those
+        ; members are, which the count cannot see. Ranked by it, a chart of
+        ; eight groups chose an order with "no" crossings that drew four,
+        ; over one with "four" that drew none. Those keep the fixed sweeps.
+        def judged:boolean keepBest
+        if ((array_length edgeOffsetSource) > 0) {
+            judged = false
+        }
+        if (judged == false) {
             def sweep:int 0
             while (sweep < sweeps) {
                 def down:boolean ((sweep % 2) == 0)
@@ -2369,6 +2381,20 @@ class LayeredLayout {
             }
             k = (k + 1)
         }
+        ; Then, with every route on the page, the brackets: each tried
+        ; against the routes as they now stand, and kept only where it
+        ; crosses no more of them than the route it replaces.
+        def b:int 0
+        while (b < (graph.edgeCount())) {
+            if ((b < (array_length chainHead)) && ((itemAt chainHead b) >= 0)) {
+                def eb:FlowEdge (graph.edgeAt(b))
+                if ((array_length eb.waypoints) >= 4) {
+                    def chainB:[int] (this.chainOf(b))
+                    this.emitBracket(b eb (this.straightenedLanes(chainB)))
+                }
+            }
+            b = (b + 1)
+        }
         return routed
     }
 
@@ -2476,6 +2502,205 @@ class LayeredLayout {
         ; waypoints are the better-informed one.
         e.hasLaneX = false
         e.hasLaneY = false
+        return true
+    }
+
+    ; A long edge whose lane is one straight run, beside both of its ends
+    ; on the same side — a skip past the next box in a column, a return up
+    ; it — is drawn as a bracket: out of the flank that faces the lane,
+    ; along the lane, into the same flank of the other end. Two corners. The
+    ; general route leaves along the flow and turns into the lane and out of
+    ; it again: four corners, and ends that leave and arrive a box's width
+    ; from where the line then runs. Only when the two short legs across
+    ; are clear of every other box.
+    fn emitBracket:boolean (edgeIdx:int e:FlowEdge lanes:[double]) {
+        def n:int (array_length lanes)
+        if (n == 0) {
+            return false
+        }
+        ; a named port says which side, and that is not this layout's call
+        if ((graph.hasPort(e.sourcePort)) || (graph.hasPort(e.targetPort))) {
+            return false
+        }
+        def lane:double (itemAt lanes 0)
+        def i:int 1
+        while (i < n) {
+            if ((fabs ((itemAt lanes i) - lane)) > 0.5) {
+                return false
+            }
+            i = (i + 1)
+        }
+        if (e.sourceIndex < 0) {
+            return false
+        }
+        if (e.targetIndex < 0) {
+            return false
+        }
+        def s:FlowNode (graph.nodeAt(e.sourceIndex))
+        def t:FlowNode (graph.nodeAt(e.targetIndex))
+        ; a flank the end can slide along: a circle's or a diamond's border
+        ; moves sideways as the socket moves up it
+        if (((LayeredLayout.flatFlanks(s.shape)) && (LayeredLayout.flatFlanks(t.shape))) == false) {
+            return false
+        }
+        def vertical:boolean (direction == "TB")
+        def sLo:double s.y
+        def sHi:double (s.y + s.height)
+        def tLo:double t.y
+        def tHi:double (t.y + t.height)
+        if vertical {
+            sLo = s.x
+            sHi = (s.x + s.width)
+            tLo = t.x
+            tHi = (t.x + t.width)
+        }
+        def room:double 8.0
+        def side:int -1
+        if ((lane > (sHi + room)) && (lane > (tHi + room))) {
+            side = 1
+            if (vertical == false) {
+                side = 2
+            }
+        }
+        if ((lane < (sLo - room)) && (lane < (tLo - room))) {
+            side = 3
+            if (vertical == false) {
+                side = 0
+            }
+        }
+        if (side < 0) {
+            return false
+        }
+        def oldS:int e.sourceHandle
+        def oldT:int e.targetHandle
+        e.sourceHandle = side
+        e.targetHandle = side
+        def x1:double (graph.endpointX(e true))
+        def y1:double (graph.endpointY(e true))
+        def x2:double (graph.endpointX(e false))
+        def y2:double (graph.endpointY(e false))
+        def pts:[double]
+        push pts x1
+        push pts y1
+        if vertical {
+            push pts lane
+            push pts y1
+            push pts lane
+            push pts y2
+        } {
+            push pts x1
+            push pts lane
+            push pts x2
+            push pts lane
+        }
+        push pts x2
+        push pts y2
+        def k:int 0
+        while (k < (graph.nodeCount())) {
+            if ((k != e.sourceIndex) && (k != e.targetIndex)) {
+                def o:FlowNode (graph.nodeAt(k))
+                if (o.hidden == false) {
+                    def q:int 2
+                    while (q < (array_length pts)) {
+                        if (LayeredLayout.legHits(o (itemAt pts (q - 2)) (itemAt pts (q - 1)) (itemAt pts q) (itemAt pts (q + 1)))) {
+                            e.sourceHandle = oldS
+                            e.targetHandle = oldT
+                            return false
+                        }
+                        q = (q + 2)
+                    }
+                }
+            }
+            k = (k + 1)
+        }
+        ; no more crossings than the route it would replace
+        e.sourceHandle = oldS
+        e.targetHandle = oldT
+        def oldCorners:[double] (EdgeRouter.cornersFor(graph e))
+        e.sourceHandle = side
+        e.targetHandle = side
+        if ((this.crossingsWith(edgeIdx pts)) > (this.crossingsWith(edgeIdx oldCorners))) {
+            e.sourceHandle = oldS
+            e.targetHandle = oldT
+            return false
+        }
+        clear e.waypoints
+        def w:int 0
+        while (w < (array_length pts)) {
+            push e.waypoints (itemAt pts w)
+            w = (w + 1)
+        }
+        e.hasLaneX = false
+        e.hasLaneY = false
+        return true
+    }
+
+    ; How many times a corner list crosses the other edges as drawn now.
+    fn crossingsWith:int (skipIdx:int pts:[double]) {
+        def total:int 0
+        def k:int 0
+        while (k < (graph.edgeCount())) {
+            if (k != skipIdx) {
+                def o:FlowEdge (graph.edgeAt(k))
+                if ((o.hidden == false) && ((o.sourceIndex >= 0) && (o.targetIndex >= 0))) {
+                    def c:[double] (EdgeRouter.cornersFor(graph o))
+                    def i:int 2
+                    while (i < (array_length c)) {
+                        def j:int 2
+                        while (j < (array_length pts)) {
+                            if (LayeredLayout.segmentsCross((itemAt pts (j - 2)) (itemAt pts (j - 1)) (itemAt pts j) (itemAt pts (j + 1)) (itemAt c (i - 2)) (itemAt c (i - 1)) (itemAt c i) (itemAt c (i + 1)))) {
+                                total = (total + 1)
+                            }
+                            j = (j + 2)
+                        }
+                        i = (i + 2)
+                    }
+                }
+            }
+            k = (k + 1)
+        }
+        return total
+    }
+
+    ; Two segments crossing properly — touching at an end does not count.
+    sfn segmentsCross:boolean (ax:double ay:double bx:double by:double cx:double cy:double dx:double dy:double) {
+        def d1:double (((bx - ax) * (cy - ay)) - ((by - ay) * (cx - ax)))
+        def d2:double (((bx - ax) * (dy - ay)) - ((by - ay) * (dx - ax)))
+        def d3:double (((dx - cx) * (ay - cy)) - ((dy - cy) * (ax - cx)))
+        def d4:double (((dx - cx) * (by - cy)) - ((dy - cy) * (bx - cx)))
+        if (((d1 * d2) < 0.0) && ((d3 * d4) < 0.0)) {
+            return true
+        }
+        return false
+    }
+
+    sfn flatFlanks:boolean (shape:string) {
+        if (shape == "rect") { return true }
+        if (shape == "roundrect") { return true }
+        if (shape == "action") { return true }
+        if (shape == "subroutine") { return true }
+        return false
+    }
+
+    ; Whether an axis-aligned leg comes within a few pixels of a box.
+    sfn legHits:boolean (o:FlowNode x1:double y1:double x2:double y2:double) {
+        def pad:double 4.0
+        def lx:double x1
+        def hx:double x2
+        if (x2 < x1) {
+            lx = x2
+            hx = x1
+        }
+        def ly:double y1
+        def hy:double y2
+        if (y2 < y1) {
+            ly = y2
+            hy = y1
+        }
+        if (hx < (o.x - pad)) { return false }
+        if (lx > ((o.x + o.width) + pad)) { return false }
+        if (hy < (o.y - pad)) { return false }
+        if (ly > ((o.y + o.height) + pad)) { return false }
         return true
     }
 

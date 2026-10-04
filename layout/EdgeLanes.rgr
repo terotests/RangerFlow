@@ -951,9 +951,15 @@ class EdgeLanes {
     ; below share a top) and the order fell out as written: half the time,
     ; crossed. A line that meets its far box flank to flank, or whose far
     ; end lies alongside this side, keeps the plain key.
+    ;
+    ; A bracket — out of a flank, along a lane, back into the same flank of
+    ; a box further down — turns twice, and the same rule holds for its
+    ; first turn: the bracket whose lane is further out leaves furthest
+    ; from where they are going, so the brackets nest instead of crossing.
     sfn cornerKey:double (g:FlowGraph e:FlowEdge here:boolean side:int along:double) {
         def farSide:int (g.edgeSide(e (here == false)))
-        if ((EdgeLanes.alongX(farSide)) == (EdgeLanes.alongX(side))) {
+        def bracket:boolean ((farSide == side) && ((array_length e.waypoints) >= 8))
+        if ((bracket == false) && ((EdgeLanes.alongX(farSide)) == (EdgeLanes.alongX(side)))) {
             return along
         }
         def owner:FlowNode (EdgeLanes.ownerOf(g e here))
@@ -964,6 +970,20 @@ class EdgeLanes {
             lo = owner.x
             hi = (owner.x + owner.width)
             perp = (fabs ((g.endpointY(e (here == false))) - (g.endpointY(e here))))
+        }
+        if bracket {
+            ; how far out the first leg goes before it turns
+            def wn:int (array_length e.waypoints)
+            def at:int 0
+            def next:int 2
+            if (here == false) {
+                at = (wn - 2)
+                next = (wn - 4)
+            }
+            perp = (fabs ((itemAt e.waypoints next) - (itemAt e.waypoints at)))
+            if (EdgeLanes.alongX(side)) {
+                perp = (fabs ((itemAt e.waypoints (next + 1)) - (itemAt e.waypoints (at + 1))))
+            }
         }
         if (along < lo) {
             return ((lo - 1000000.0) + perp)

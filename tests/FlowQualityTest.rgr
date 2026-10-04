@@ -152,6 +152,8 @@ class QMeasure {
     def alignMisses:int 0
     def centreMisses:int 0
     def ms:double 0.0
+    ; which edges detoured, for the report
+    def notes:string ""
 }
 
 ; Totals per family, for the table at the end.
@@ -270,22 +272,25 @@ class FlowQualityTest {
     }
 
     ; Two boxes facing each other across one gap, with room for a straight
-    ; line between them and nothing standing in that room.
+    ; line between them and nothing standing in that room. The room is
+    ; where a line may meet each box: the middle 70 % of its side, which is
+    ; what the router lets a socket use — two boxes that overlap only at
+    ; their corners have no straight line between them to be had.
     sfn straightPossible:boolean (g:FlowGraph a:FlowNode b:FlowNode vertical:boolean) {
         def lo:double 0.0
         def hi:double 0.0
         if vertical {
-            lo = a.x
-            if (b.x > lo) { lo = b.x }
-            hi = (a.x + a.width)
-            if ((b.x + b.width) < hi) { hi = (b.x + b.width) }
+            lo = ((a.centerX()) - (a.width * 0.35))
+            if (((b.centerX()) - (b.width * 0.35)) > lo) { lo = ((b.centerX()) - (b.width * 0.35)) }
+            hi = ((a.centerX()) + (a.width * 0.35))
+            if (((b.centerX()) + (b.width * 0.35)) < hi) { hi = ((b.centerX()) + (b.width * 0.35)) }
         } {
-            lo = a.y
-            if (b.y > lo) { lo = b.y }
-            hi = (a.y + a.height)
-            if ((b.y + b.height) < hi) { hi = (b.y + b.height) }
+            lo = ((a.centerY()) - (a.height * 0.35))
+            if (((b.centerY()) - (b.height * 0.35)) > lo) { lo = ((b.centerY()) - (b.height * 0.35)) }
+            hi = ((a.centerY()) + (a.height * 0.35))
+            if (((b.centerY()) + (b.height * 0.35)) < hi) { hi = ((b.centerY()) + (b.height * 0.35)) }
         }
-        if ((hi - lo) < 24.0) {
+        if ((hi - lo) < 16.0) {
             return false
         }
         ; the band between them along the flow
@@ -437,6 +442,7 @@ class FlowQualityTest {
                             if (FlowQualityTest.straightPossible(g a b k.vertical)) {
                                 if ((RouteQuality.bends(g e)) > 0) {
                                     m.detours = (m.detours + 1)
+                                    m.notes = (m.notes + " detour:" + e.source + "->" + e.target)
                                 }
                             }
                             def p:EdgePath (EdgeRouter.route(g e))
@@ -545,12 +551,12 @@ class FlowQualityTest {
         ; a time limit that grows with the size: a few ms a box is what a
         ; drag at 60 frames a second can afford for the diagrams people
         ; write, and a frozen tab is what it is there to prevent
-        def budget:double (150.0 + ((to_double k.nodes) * 6.0))
+        def budget:double (100.0 + ((to_double k.nodes) * 3.0))
         if (m.ms > budget) { bad = true }
         c.ok((tag + ": drawn in " + (to_string (to_int m.ms)) + " ms <= " + (to_string (to_int budget))) (m.ms <= budget))
         if (bad || verbose) {
-            print ("  ---- " + tag + "  crossings=" + (to_string m.crossings) + " through=" + (to_string m.through) + " detours=" + (to_string m.detours) + " bends=" + (to_string m.bends) + " ms=" + (to_string (to_int m.ms)))
-            if bad {
+            print ("  ---- " + tag + "  crossings=" + (to_string m.crossings) + " through=" + (to_string m.through) + " onEachOther=" + (to_string m.onEachOther) + " detours=" + (to_string m.detours) + " bends=" + (to_string m.bends) + " ms=" + (to_string (to_int m.ms)) + m.notes)
+            if (bad || verbose) {
                 print k.src
             }
         }
@@ -808,9 +814,8 @@ class FlowQualityTest {
                 s = (s + 1)
             }
             k.nodes = n
-            ; three skips on one side of a chain cannot always pass each
-            ; other without meeting
-            k.maxCrossings = (skips - 1)
+            ; skips off one chain nest as brackets: none of them need cross
+            k.maxCrossings = 0
             this.judge(k)
             seed = (seed + 1)
         }
@@ -839,7 +844,7 @@ class FlowQualityTest {
                 b = (b + 1)
             }
             k.nodes = n
-            k.maxCrossings = (backs - 1)
+            k.maxCrossings = 0
             this.judge(k)
             seed = (seed + 1)
         }
@@ -1179,5 +1184,37 @@ class FlowQualityTest {
             i = (i + 1)
         }
         print ("  total " + (to_string (to_int totalMs)) + " ms")
+        this.ceilings()
+    }
+
+    ; What each family may add up to. The per-case checks hold what a case
+    ; must never do; these hold the totals at what the engine does now, a
+    ; little above, so a change that makes the pictures worse on the whole
+    ; — more crossings in the dense graphs, more corners, lines drawn on
+    ; each other — fails here even when no single case crosses a line.
+    ; Lower them when the engine gets better.
+    ;
+    ;              family       crossings  bends  detours  onEachOther
+    fn ceilings:void () {
+        this.ceiling("chain"        0      0     0     0)
+        this.ceiling("fan"          0    180     0     0)
+        this.ceiling("tree"         0    830     2     2)
+        this.ceiling("planar"       0   1450     4     2)
+        this.ceiling("twisted"      0    590     2     2)
+        this.ceiling("longskip"     0    175     2     8)
+        this.ceiling("cycle"        0     95     2    12)
+        this.ceiling("groups"       0     60     2     2)
+        this.ceiling("components"   0      0     0     0)
+        this.ceiling("dense"      165   2350    30    56)
+        this.ceiling("scale"      190   2000    30    70)
+        c.ok(("all " + (to_string (to_int totalMs)) + " ms of drawing within 4000 ms") (totalMs < 4000.0))
+    }
+
+    fn ceiling:void (name:string crossings:int bends:int detours:int onEach:int) {
+        def f:QFamily (this.familyOf(name))
+        c.ok((name + ": crossings in all " + (to_string f.crossings) + " <= " + (to_string crossings)) (f.crossings <= crossings))
+        c.ok((name + ": corners in all " + (to_string f.bends) + " <= " + (to_string bends)) (f.bends <= bends))
+        c.ok((name + ": detours in all " + (to_string f.detours) + " <= " + (to_string detours)) (f.detours <= detours))
+        c.ok((name + ": lines on each other in all " + (to_string f.onEachOther) + " <= " + (to_string onEach)) (f.onEachOther <= onEach))
     }
 }

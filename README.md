@@ -54,6 +54,7 @@ npm run rangerflow:force       # React Flow's force-layout example, in Ranger
 npm run rangerflow:bench       # layout / scene / drag timings at 500 nodes
 npm run rangerflow:drag        # drop every node everywhere, count the lines left crossing
 npm run rangerflow:quality     # every fixture measured: lines through nodes, on each other, square, beside, corners
+npm run rangerflow:quality:test  # ~450 generated hard diagrams held to crossings, order, corners and time
 npm run rangerflow:demo:web    # build the page, serve it, open a browser
 npm run rangerflow:web:serve   # …the same without opening anything
 npm run rangerflow:web:test    # …or run all thirteen demos in headless Chrome
@@ -204,6 +205,17 @@ of prose stays a three-node flowchart.
 ```ranger
 def sc:FlowScene (MermaidRender.sceneOf(text "default" columnWidth 10.0))
 def root:EVGElement (sc.toEvgTree())        ; → PDF, HTML; or toDisplayList() → GPU
+```
+
+A caller that draws the same diagrams again and again — a slide deck, a live
+preview — keeps a `MermaidSceneCache` and asks it instead: an unchanged text
+is handed back the scene drawn last time, with no layout and no routing, and
+a text whose shape is unchanged (a label edited) skips the crossing search
+through the cache's `FlowLayoutMemo` and keeps every box where it was.
+
+```ranger
+def cache (new MermaidSceneCache)                 ; one per deck / page / editor
+def sc:FlowScene (cache.scene(text "default" columnWidth 10.0 0.0))
 ```
 
 `gallery/markdown` draws its ```mermaid fences through it. The web facade's
@@ -1637,6 +1649,65 @@ back is the same row, not a copy that looks like it.
 The new column arrives with the caret already in its name. A placeholder called
 `uusi_sarake` that you then have to find and double-click is a placeholder
 nobody replaces.
+
+## Hundreds of diagrams built to be hard
+
+A test of a few known diagrams says those diagrams are fine.
+[`tests/FlowQualityTest.rgr`](tests/FlowQualityTest.rgr) generates its
+diagrams instead — from seeds, so any failure can be drawn again, and from
+families whose best drawing is known before the engine sees them:
+
+| family | what is built | what it is held to |
+| --- | --- | --- |
+| chain | a line of boxes, TD and LR | one straight column, no corner |
+| fan | one box feeding 2…8, or 2…8 feeding one | no crossing; children in the written order; the parent centred over them |
+| tree | 60 random trees | no crossing (every tree has such a drawing); siblings in the written order |
+| planar | 80 layered graphs built crossing-free, written down shuffled | no crossing: the engine has to find the drawing |
+| twisted | the same, every other layer written backwards | no crossing |
+| longskip | a chain with edges skipping layers | nothing through a box, no crossing |
+| cycle | a chain with returns up it | no crossing |
+| groups | subgraphs linked to each other | nothing through a box |
+| components | unconnected pieces | in the order written |
+| dense, scale | random DAGs, 10…400 boxes, most with no crossing-free drawing | totals capped, nothing through a box, time |
+
+Every case is also held to: no line through a box, every line ending on its
+box, and a time budget of 100 ms + 3 ms a box — the layout runs on a
+browser's main thread. The totals per family (crossings, corners, detours,
+lines on each other) are capped at what the engine does now, so a change
+that makes the pictures worse on the whole fails even when no single case
+does. The table it prints is the before/after of any change to the engine.
+
+What it found, and what changed because of it:
+
+- **The order of a layer is searched for, not just swept.** Crossings
+  between layers are counted (a Fenwick tree, E log V); the barycentre sweeps
+  keep the best order they meet instead of the last, and stop when they stop
+  improving; transpose and sifting follow; and while crossings are left the
+  search restarts — from a depth-first order, the mirror, seeded shuffles —
+  paid for out of a work budget (`orderBudget`, `restartShare`), so a graph
+  nobody could read costs a frame, not the tab. A tree came out crossed in 24
+  of 60 cases and a crossing-free layered graph in 22 of 80; now in none.
+- **A leaf stays among its siblings.** `A → B, C, D` with only B and D going
+  on was drawn B D C; the leaf now steps aside past long edges but not past
+  the boxes it was written among.
+- **Boxes in different layers meet by an L, not an S.** A child far to the
+  side was joined flank to flank — out of the parent's side and into its
+  own. Now it is one corner, on whichever end has a clear run, and of the
+  L's at one box only the outermost use its flank, so they cannot cross.
+- **A skip past the next box is a bracket**: out of the flank, along the
+  lane, into the same flank — two corners instead of four, nested, never
+  crossing.
+- **A straight line is not worth a crossing**: the straight-lane search no
+  longer moves a socket past a neighbour's when that cuts its line.
+- **The obstacle repair looks near first.** On a diagram of hundreds of
+  boxes its grid grew past its limit and the repair was refused, leaving a
+  line through a box.
+- **An order once found is kept** (`LayoutMemo`), and a scene once drawn is
+  handed back (`MermaidSceneCache`).
+
+Before and after, the same 450 diagrams: crossings in the families that have
+a crossing-free drawing 161 → 0, lines through a box 87 → 0, the written
+order broken 100 times → 0, and the whole run 3.9 s → 0.8 s.
 
 ## The layers
 
