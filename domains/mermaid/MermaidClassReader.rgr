@@ -490,8 +490,13 @@ class MermaidClassReader {
         while ((strlen left) > 0) {
             def tailAt:int ((strlen left) - 1)
             def cc:int (charAt left tailAt)
+            def ccText:string (substring left tailAt (tailAt + 1))
             if (MermaidClassReader.isOrnamentCode(cc)) {
-                leftMark = ((strfromcode cc) + leftMark)
+                if (cc < 128) {
+                    leftMark = ((strfromcode cc) + leftMark)
+                } {
+                    leftMark = (ccText + leftMark)
+                }
                 left = (trim (substring left 0 tailAt))
             } {
                 break
@@ -500,8 +505,13 @@ class MermaidClassReader {
         def rightMark:string ""
         while ((strlen right) > 0) {
             def rc:int (charAt right 0)
+            def rcText:string (substring right 0 (0 + 1))
             if (MermaidClassReader.isOrnamentCode(rc)) {
-                rightMark = (rightMark + (strfromcode rc))
+                if (rc < 128) {
+                    rightMark = (rightMark + (strfromcode rc))
+                } {
+                    rightMark = (rightMark + rcText)
+                }
                 right = (trim (substring right 1 (strlen right)))
             } {
                 break

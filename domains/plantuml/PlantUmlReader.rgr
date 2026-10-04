@@ -58,12 +58,17 @@ class PlantUmlText {
         def i:int 0
         while (i < (strlen t)) {
             def c:int (charAt t i)
+            def cText:string (substring t i (i + 1))
             if (c >= 65) {
                 if (c <= 90) {
                     c = (c + 32)
                 }
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + cText)
+            }
             i = (i + 1)
         }
         return out
@@ -198,6 +203,7 @@ class PlantUmlText {
         def n:int (strlen t)
         while (i < n) {
             def c:int (charAt t i)
+            def cText:string (substring t i (i + 1))
             ; `\n` — a break the author asked for.
             if (c == 92) {
                 if ((i + 1) < n) {
@@ -236,7 +242,11 @@ class PlantUmlText {
                     continue
                 }
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + cText)
+            }
             i = (i + 1)
         }
         return (trim out)

@@ -825,6 +825,7 @@ class FlowScene {
         def i:int 0
         while (i < (strlen v)) {
             def c:int (charAt v i)
+            def cText:string (substring v i (i + 1))
             if (c == 38) {
                 out = (out + "&amp;")
             } {
@@ -834,7 +835,11 @@ class FlowScene {
                     if (c == 62) {
                         out = (out + "&gt;")
                     } {
-                        out = (out + (strfromcode c))
+                        if (c < 128) {
+                            out = (out + (strfromcode c))
+                        } {
+                            out = (out + cText)
+                        }
                     }
                 }
             }

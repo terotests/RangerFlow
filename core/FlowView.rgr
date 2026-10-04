@@ -331,12 +331,17 @@ class FlowView {
         def i:int 0
         while (i < (strlen t)) {
             def c:int (charAt t i)
+            def cText:string (substring t i (i + 1))
             def cw:double (measurer.measureChar(c theme.fontFamily size))
             if ((acc + cw) > budget) {
                 return (out + "…")
             }
             acc = (acc + cw)
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + cText)
+            }
             i = (i + 1)
         }
         return out
@@ -2226,7 +2231,7 @@ class FlowView {
             return
         }
         def ty:double (y + ((rowH - (size * 1.2)) * 0.5))
-        def badgeW:double (this.sl(14.0))
+        def badgeW:double (this.badgeColumn(n size))
         if ((strlen row.badge) > 0) {
             def bcol:string theme.keyColor
             if (row.badge == "fk") { bcol = theme.fkColor }
@@ -2294,6 +2299,68 @@ class FlowView {
         }
         nt.tag = rowTag
         this.paintCaretAt(sc rowTag label lay.size nameX ty2 bold)
+        if ((strlen row.note) > 0) {
+            ; after the name, in what the name leaves; cut short rather than
+            ; shrunk, so every row's remark is set at the same size
+            def gap:double (this.sl(8.0))
+            def noteX:double ((nameX + (this.textWidthBold(label lay.size bold))) + gap)
+            def noteW:double (((right - trailW) - detailW) - noteX)
+            if ((this.drawn(noteW)) >= (labelFloorPx * 1.6)) {
+                def shown:string row.note
+                if ((this.textWidth(row.note size)) > noteW) {
+                    shown = (FlowView.cutToWidth(this row.note size noteW))
+                }
+                def ct:SceneItem (sc.text(shown noteX ty noteW size theme.nodeMutedText))
+                ct.fontFamily = theme.fontFamily
+                ct.italic = true
+                ct.tag = rowTag
+            }
+        }
+    }
+
+    ; The width of a node's badge column: wide enough for its widest badge.
+    ; A key's `PK` is wider than the fixed 14 a `+` or `#` needs, and a name
+    ; drawn at that 14 ran into it ("PKid"). One width for the whole node, so
+    ; the names of keyed and unkeyed rows still line up.
+    fn badgeColumn:double (n:FlowNode size:double) {
+        def w:double (this.sl(14.0))
+        def si:int 0
+        while (si < (n.sectionCount())) {
+            def sec:FlowSection (n.sectionAt(si))
+            def ri:int 0
+            while (ri < (array_length sec.rows)) {
+                def r:FlowRow (itemAt sec.rows ri)
+                if ((strlen r.badge) > 1) {
+                    def bw:double ((this.textWidthBold((FlowView.badgeGlyph(r.badge)) size true)) + (this.sl(5.0)))
+                    if (bw > w) {
+                        w = bw
+                    }
+                }
+                ri = (ri + 1)
+            }
+            si = (si + 1)
+        }
+        return w
+    }
+
+    ; The longest start of `t` that fits `room` with an ellipsis after it.
+    sfn cutToWidth:string (v:FlowView t:string size:double room:double) {
+        def dots:string "…"
+        ; the whole of it did not fit: start one shorter
+        def end:int ((strlen t) - 1)
+        while (end > 0) {
+            ; not inside a character: natively a string is bytes, and 128-191
+            ; is the middle of one
+            def next:int (charAt t end)
+            if ((next < 128) || (next >= 192)) {
+                def head:string ((substring t 0 end) + dots)
+                if ((v.textWidth(head size)) <= room) {
+                    return head
+                }
+            }
+            end = (end - 1)
+        }
+        return ""
     }
 
     sfn badgeGlyph:string (badge:string) {

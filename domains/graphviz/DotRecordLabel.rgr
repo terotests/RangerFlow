@@ -151,6 +151,7 @@ class DotRecordLabel {
         def text:string ""
         while (pos < (strlen src)) {
             def c:int (charAt src pos)
+            def cText:string (substring src pos (pos + 1))
             if (c == 124) {
                 break
             }
@@ -167,7 +168,11 @@ class DotRecordLabel {
                 text = (text + (this.escaped()))
                 continue
             }
-            text = (text + (strfromcode c))
+            if (c < 128) {
+                text = (text + (strfromcode c))
+            } {
+                text = (text + cText)
+            }
             pos = (pos + 1)
         }
         cell.text = (trim text)
@@ -178,18 +183,23 @@ class DotRecordLabel {
         def name:string ""
         while (pos < (strlen src)) {
             def c:int (charAt src pos)
+            def cText:string (substring src pos (pos + 1))
             pos = (pos + 1)
             if (c == 62) {
                 return (trim name)
             }
             if (c == 92) {
                 if (pos < (strlen src)) {
-                    name = (name + (strfromcode (charAt src pos)))
+                    name = (name + (substring src pos (pos + 1)))
                     pos = (pos + 1)
                 }
                 continue
             }
-            name = (name + (strfromcode c))
+            if (c < 128) {
+                name = (name + (strfromcode c))
+            } {
+                name = (name + cText)
+            }
         }
         ok = false
         return (trim name)
@@ -540,10 +550,15 @@ class DotHtmlLabel {
         def i:int 0
         while (i < (strlen tag)) {
             def c:int (charAt tag i)
+            def cText:string (substring tag i (i + 1))
             if (DotChars.isSpace(c)) {
                 return out
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + cText)
+            }
             i = (i + 1)
         }
         return out
@@ -578,22 +593,32 @@ class DotHtmlLabel {
                     def out:string ""
                     while (at < (strlen tag)) {
                         def q:int (charAt tag at)
+                        def qText:string (substring tag at (at + 1))
                         at = (at + 1)
                         if (q == 34) {
                             return out
                         }
-                        out = (out + (strfromcode q))
+                        if (q < 128) {
+                            out = (out + (strfromcode q))
+                        } {
+                            out = (out + qText)
+                        }
                     }
                     return out
                 }
                 def bare:string ""
                 while (at < (strlen tag)) {
                     def b:int (charAt tag at)
+                    def bText:string (substring tag at (at + 1))
                     at = (at + 1)
                     if (DotChars.isSpace(b)) {
                         return bare
                     }
-                    bare = (bare + (strfromcode b))
+                    if (b < 128) {
+                        bare = (bare + (strfromcode b))
+                    } {
+                        bare = (bare + bText)
+                    }
                 }
                 return bare
             }
@@ -608,6 +633,7 @@ class DotHtmlLabel {
         def i:int 0
         while (i < (strlen raw)) {
             def c:int (charAt raw i)
+            def cText:string (substring raw i (i + 1))
             if (c == 60) {
                 def close:int (DotHtmlLabel.tagEnd(raw i))
                 if (close < 0) {
@@ -623,7 +649,11 @@ class DotHtmlLabel {
                 i = (close + 1)
                 continue
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + cText)
+            }
             i = (i + 1)
         }
         return (DotHtmlLabel.squeeze(out))
@@ -636,6 +666,7 @@ class DotHtmlLabel {
         def i:int 0
         while (i < (strlen raw)) {
             def c:int (charAt raw i)
+            def cText:string (substring raw i (i + 1))
             i = (i + 1)
             if (c == 10) {
                 out = (out + "\n")
@@ -650,7 +681,11 @@ class DotHtmlLabel {
                 continue
             }
             space = false
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + cText)
+            }
         }
         return (trim out)
     }
