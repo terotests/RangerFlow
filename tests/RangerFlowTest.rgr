@@ -3368,6 +3368,31 @@ class RangerFlowTest {
         c.ok("a non-identifying relationship is drawn dashed" (e2.dash > 0.0))
         c.eqInt("nothing is drawn through an entity" (EdgeOverlap.nodeCrossings(g)) 0)
 
+        ; The quoted comment is drawn after the attribute's name, dimmed; the
+        ; key badge has a column of its own, so `PK` does not run into the
+        ; name ("PKid").
+        def custCols:FlowSection (custNode.sectionAt(0))
+        def scoreRow:FlowRow (itemAt custCols.rows 2)
+        c.eqStr("the comment rides on the row" scoreRow.note "how good they are")
+        c.eqStr("and is the row's tooltip" scoreRow.tooltip "how good they are")
+        def sc:FlowScene (MermaidRender.sceneOf(src "default" 0.0 8.0))
+        def noteItem:SceneItem (new SceneItem)
+        def keyItem:SceneItem (new SceneItem)
+        def keyName:SceneItem (new SceneItem)
+        def k:int 0
+        while (k < (array_length sc.items)) {
+            def it:SceneItem (itemAt sc.items k)
+            if (it.text == "how good they are") { noteItem = it }
+            if ((it.text == "PK") && (it.tag == "node:CUSTOMER")) { keyItem = it }
+            if (it.text == "custNumber") { keyName = it }
+            k = (k + 1)
+        }
+        c.ok("the comment is drawn" ((strlen noteItem.text) > 0))
+        c.ok("in italics" noteItem.italic)
+        c.ok("the key badge is drawn" ((strlen keyItem.text) > 0))
+        ; `PK` in bold is about 1.4 em; the fixed column was 14 at 11 px
+        c.ok("and the name starts clear of it" ((keyName.x - keyItem.x) > (keyItem.fontSize * 1.6)))
+
         ; The file Mermaid's own documentation is written from.
         def real:string (?? (read_file "." "gallery/rangerflow/fixtures/er_orders.mmd") "")
         if ((strlen real) > 0) {

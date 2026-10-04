@@ -196,6 +196,9 @@ class FlowRow {
     ; Right-hand columns; empty strings simply take no space.
     def detail:string ""
     def trailing:string ""
+    ; A remark drawn after the name, dimmed: an ER attribute's quoted comment
+    ; (`string name "the customer's name"`). "" = none.
+    def note:string ""
     ; The port a connection to this row attaches to ("" = the node's own).
     def portId:string ""
     ; 0 normal, 1 emphasised (a key), 2 muted (a derived or nullable field).

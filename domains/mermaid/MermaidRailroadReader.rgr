@@ -533,11 +533,16 @@ class MermaidRailroadReader {
         def out:string ""
         while (at < (strlen src)) {
             def c:int (charAt src at)
+            def cText:string (substring src at (at + 1))
             at = (at + 1)
             if (c == q) {
                 return out
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + cText)
+            }
         }
         return out
     }
@@ -547,11 +552,16 @@ class MermaidRailroadReader {
         at = (at + 1)
         while (at < (strlen src)) {
             def c:int (charAt src at)
+            def cText:string (substring src at (at + 1))
             at = (at + 1)
             if (c == close) {
                 return out
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + cText)
+            }
         }
         return out
     }
@@ -560,8 +570,13 @@ class MermaidRailroadReader {
         def out:string ""
         while (at < (strlen src)) {
             def c:int (charAt src at)
+            def cText:string (substring src at (at + 1))
             if (MermaidRailroadReader.isNameCode(c)) {
-                out = (out + (strfromcode c))
+                if (c < 128) {
+                    out = (out + (strfromcode c))
+                } {
+                    out = (out + cText)
+                }
                 at = (at + 1)
             } {
                 return out

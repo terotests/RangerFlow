@@ -323,9 +323,14 @@ class MermaidBlockReader {
         def i:int 0
         while (i < n) {
             def c:int (charAt st i)
+            def cText:string (substring st i (i + 1))
             i = (i + 1)
             if (quote != 0) {
-                cur = (cur + (strfromcode c))
+                if (c < 128) {
+                    cur = (cur + (strfromcode c))
+                } {
+                    cur = (cur + cText)
+                }
                 if (c == quote) {
                     quote = 0
                 }
@@ -333,7 +338,11 @@ class MermaidBlockReader {
             }
             if (c == 34) {
                 quote = 34
-                cur = (cur + (strfromcode c))
+                if (c < 128) {
+                    cur = (cur + (strfromcode c))
+                } {
+                    cur = (cur + cText)
+                }
                 continue
             }
             if (c == 91) { depth = (depth + 1) }
@@ -349,7 +358,11 @@ class MermaidBlockReader {
                     continue
                 }
             }
-            cur = (cur + (strfromcode c))
+            if (c < 128) {
+                cur = (cur + (strfromcode c))
+            } {
+                cur = (cur + cText)
+            }
         }
         push out cur
         return out

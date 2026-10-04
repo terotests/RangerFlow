@@ -62,6 +62,7 @@ class FlowGraphCodec {
         def i:int 0
         while (i < (strlen v)) {
             def c:int (charAt v i)
+            def cText:string (substring v i (i + 1))
             if (c == 34) {
                 out = (out + "\\\"")
             } {
@@ -80,7 +81,11 @@ class FlowGraphCodec {
                                 if (c < 32) {
                                     out = (out + "\\u00" + (FlowGraphCodec.hex2(c)))
                                 } {
-                                    out = (out + (strfromcode c))
+                                    if (c < 128) {
+                                        out = (out + (strfromcode c))
+                                    } {
+                                        out = (out + cText)
+                                    }
                                 }
                             }
                         }

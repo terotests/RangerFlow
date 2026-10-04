@@ -172,12 +172,17 @@ class D2Keys {
         def i:int 0
         while (i < (strlen t)) {
             def c:int (charAt t i)
+            def cText:string (substring t i (i + 1))
             if (c >= 65) {
                 if (c <= 90) {
                     c = (c + 32)
                 }
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + cText)
+            }
             i = (i + 1)
         }
         return out
@@ -877,6 +882,7 @@ class D2Model {
         def n:int (strlen text)
         while (i < n) {
             def c:int (charAt text i)
+            def cText:string (substring text i (i + 1))
             if (c == 36) {
                 if ((i + 1) < n) {
                     if ((charAt text (i + 1)) == 123) {
@@ -899,7 +905,11 @@ class D2Model {
                     }
                 }
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + cText)
+            }
             i = (i + 1)
         }
         return out
@@ -958,6 +968,7 @@ class D2Model {
         def i:int 0
         while (i < (strlen id)) {
             def c:int (charAt id i)
+            def cText:string (substring id i (i + 1))
             i = (i + 1)
             if (c == 34) {
                 if quoted {
@@ -965,7 +976,11 @@ class D2Model {
                 } {
                     quoted = true
                 }
-                cur = (cur + (strfromcode c))
+                if (c < 128) {
+                    cur = (cur + (strfromcode c))
+                } {
+                    cur = (cur + cText)
+                }
                 continue
             }
             if (c == 46) {
@@ -975,7 +990,11 @@ class D2Model {
                     continue
                 }
             }
-            cur = (cur + (strfromcode c))
+            if (c < 128) {
+                cur = (cur + (strfromcode c))
+            } {
+                cur = (cur + cText)
+            }
         }
         push out cur
         return out

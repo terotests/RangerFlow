@@ -136,11 +136,16 @@ class SqlSchemaReader {
         def out:string ""
         while (i < n) {
             def c:int (charAt sql i)
+            def cText:string (substring sql i (i + 1))
             if (c == closeCode) {
                 i = (i + 1)
                 break
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + cText)
+            }
             i = (i + 1)
         }
         this.pushToken(out kind)

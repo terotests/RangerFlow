@@ -242,6 +242,7 @@ class MermaidSankeyReader {
         def quote:int 0
         while (i < n) {
             def c:int (charAt line i)
+            def cText:string (substring line i (i + 1))
             if (quote == 0) {
                 if (c == 44) {
                     push out cur
@@ -264,14 +265,22 @@ class MermaidSankeyReader {
                         continue
                     }
                 }
-                cur = (cur + (strfromcode c))
+                if (c < 128) {
+                    cur = (cur + (strfromcode c))
+                } {
+                    cur = (cur + cText)
+                }
                 i = (i + 1)
                 continue
             }
             if (c == quote) {
                 if ((i + 1) < n) {
                     if ((charAt line (i + 1)) == quote) {
-                        cur = (cur + (strfromcode c))
+                        if (c < 128) {
+                            cur = (cur + (strfromcode c))
+                        } {
+                            cur = (cur + cText)
+                        }
                         i = (i + 2)
                         continue
                     }
@@ -280,7 +289,11 @@ class MermaidSankeyReader {
                 i = (i + 1)
                 continue
             }
-            cur = (cur + (strfromcode c))
+            if (c < 128) {
+                cur = (cur + (strfromcode c))
+            } {
+                cur = (cur + cText)
+            }
             i = (i + 1)
         }
         push out cur
