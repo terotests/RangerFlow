@@ -269,6 +269,16 @@ class D2Parser {
         return (charAt src at)
     }
 
+    ; The character at `at` as text. `strfromcode (this.peek())` is the same
+    ; for ASCII, but a native string is bytes and `peek` one of them, so past
+    ; ASCII only a slice of the source keeps the character whole.
+    fn peekText:string () {
+        if (at >= (strlen src)) {
+            return ""
+        }
+        return (substring src at (at + 1))
+    }
+
     fn peekAt:int (k:int) {
         def i:int (at + k)
         if (i >= (strlen src)) {
@@ -540,7 +550,11 @@ class D2Parser {
             if (c == 125) {
                 break
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + (this.peekText()))
+            }
             this.bump()
         }
         return (trim out)
@@ -670,7 +684,11 @@ class D2Parser {
                         digits = false
                     }
                 }
-                num = (num + (strfromcode c))
+                if (c < 128) {
+                    num = (num + (strfromcode c))
+                } {
+                    num = (num + (this.peekText()))
+                }
                 this.bump()
             }
             if digits {
@@ -739,7 +757,11 @@ class D2Parser {
                 if (esc < 0) {
                     break
                 }
-                out = (out + (strfromcode esc))
+                if (esc < 128) {
+                    out = (out + (strfromcode esc))
+                } {
+                    out = (out + (this.peekText()))
+                }
                 this.bump()
                 continue
             }
@@ -751,7 +773,11 @@ class D2Parser {
                     this.bump()
                 }
             }
-            out = (out + (strfromcode ch))
+            if (ch < 128) {
+                out = (out + (strfromcode ch))
+            } {
+                out = (out + (this.peekText()))
+            }
             this.bump()
         }
         prt.name = (D2Parser.rtrim(out))
@@ -781,7 +807,11 @@ class D2Parser {
             if (c == 125) {
                 return (out + "}")
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + (substring src (at - 1) at))
+            }
         }
         return out
     }
@@ -878,11 +908,19 @@ class D2Parser {
                     this.bump()
                     continue
                 }
-                out = (out + (strfromcode esc))
+                if (esc < 128) {
+                    out = (out + (strfromcode esc))
+                } {
+                    out = (out + (this.peekText()))
+                }
                 this.bump()
                 continue
             }
-            out = (out + (strfromcode ch))
+            if (ch < 128) {
+                out = (out + (strfromcode ch))
+            } {
+                out = (out + (this.peekText()))
+            }
             this.bump()
         }
         def t:string (D2Parser.rtrim(out))
@@ -1018,7 +1056,11 @@ class D2Parser {
             if (ch == 44) {
                 break
             }
-            out = (out + (strfromcode ch))
+            if (ch < 128) {
+                out = (out + (strfromcode ch))
+            } {
+                out = (out + (this.peekText()))
+            }
             this.bump()
         }
         def t:string (D2Parser.rtrim(out))
@@ -1048,7 +1090,11 @@ class D2Parser {
             if (D2Parser.isWordCode(c)) {
                 break
             }
-            quote = (quote + (strfromcode c))
+            if (c < 128) {
+                quote = (quote + (strfromcode c))
+            } {
+                quote = (quote + (this.peekText()))
+            }
             this.bump()
         }
         def tag:string ""
@@ -1060,7 +1106,11 @@ class D2Parser {
             if (D2Parser.isSpace(c)) {
                 break
             }
-            tag = (tag + (strfromcode c))
+            if (c < 128) {
+                tag = (tag + (strfromcode c))
+            } {
+                tag = (tag + (this.peekText()))
+            }
             this.bump()
         }
         if ((strlen tag) == 0) {
@@ -1096,7 +1146,11 @@ class D2Parser {
                 }
                 break
             }
-            body = (body + (strfromcode c))
+            if (c < 128) {
+                body = (body + (strfromcode c))
+            } {
+                body = (body + (this.peekText()))
+            }
             this.bump()
         }
         v.kind = "block"
@@ -1155,12 +1209,20 @@ class D2Parser {
                         this.bump()
                         continue
                     }
-                    out = (out + (strfromcode esc))
+                    if (esc < 128) {
+                        out = (out + (strfromcode esc))
+                    } {
+                        out = (out + (this.peekText()))
+                    }
                     this.bump()
                     continue
                 }
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + (this.peekText()))
+            }
             this.bump()
         }
         return out

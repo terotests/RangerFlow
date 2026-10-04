@@ -332,8 +332,13 @@ class MermaidErReader {
         while ((strlen left) > 0) {
             def at:int ((strlen left) - 1)
             def c2:int (charAt left at)
+            def c2Text:string (substring left at (at + 1))
             if (MermaidErReader.isCardinalityCode(c2)) {
-                leftToken = ((strfromcode c2) + leftToken)
+                if (c2 < 128) {
+                    leftToken = ((strfromcode c2) + leftToken)
+                } {
+                    leftToken = (c2Text + leftToken)
+                }
                 left = (substring left 0 at)
             } {
                 break
@@ -342,8 +347,13 @@ class MermaidErReader {
         def rightToken:string ""
         while ((strlen right) > 0) {
             def c3:int (charAt right 0)
+            def c3Text:string (substring right 0 (0 + 1))
             if (MermaidErReader.isCardinalityCode(c3)) {
-                rightToken = (rightToken + (strfromcode c3))
+                if (c3 < 128) {
+                    rightToken = (rightToken + (strfromcode c3))
+                } {
+                    rightToken = (rightToken + c3Text)
+                }
                 right = (substring right 1 (strlen right))
             } {
                 break
@@ -526,6 +536,9 @@ class MermaidErFlow {
         ; have is a line of chrome.
         s2g.showIndexes = false
         s2g.showConstraints = false
+        s2g.showComments = true
+        ; room for a name and its comment side by side
+        s2g.maxWidth = 440.0
         def g:FlowGraph (s2g.build(d.schema))
         ; The caption, where an entity was given one.
         def t:int 0

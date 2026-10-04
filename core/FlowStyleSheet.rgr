@@ -499,13 +499,18 @@ class FlowStyle {
         def i:int 0
         while (i < (strlen t)) {
             def c:int (charAt t i)
+            def cText:string (substring t i (i + 1))
             if (c >= 65) {
                 if (c <= 90) {
                     out = (out + "-")
                     c = (c + 32)
                 }
             }
-            out = (out + (strfromcode c))
+            if (c < 128) {
+                out = (out + (strfromcode c))
+            } {
+                out = (out + cText)
+            }
             i = (i + 1)
         }
         return out
@@ -536,6 +541,7 @@ class FlowStyle {
         def i:int 0
         while (i < (strlen v)) {
             def c:int (charAt v i)
+            def cText:string (substring v i (i + 1))
             def keep:boolean false
             if (c == 45) { keep = true }
             if (c == 46) { keep = true }
@@ -547,7 +553,11 @@ class FlowStyle {
             if (keep == false) {
                 i = (strlen v)
             } {
-                digits = (digits + (strfromcode c))
+                if (c < 128) {
+                    digits = (digits + (strfromcode c))
+                } {
+                    digits = (digits + cText)
+                }
                 i = (i + 1)
             }
         }
