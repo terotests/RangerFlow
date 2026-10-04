@@ -22,7 +22,10 @@
 ;
 ;   1. break cycles          a DFS; back edges are reversed for layout only
 ;   2. assign layers         longest path from a source
-;   3. order within layers   barycentre sweeps, which is the crossing reduction
+;   3. order within layers   barycentre sweeps, which is the crossing reduction,
+;                            counted and kept at its best, then transpose and
+;                            sifting, with restarts while crossings are left —
+;                            all within a work budget (`orderBudget`)
 ;   4. assign coordinates    pack each layer, centre it on its neighbours
 ;
     ; The seed for (3) is the order the chart was written in. Under TB/BT a
@@ -62,6 +65,29 @@ class LayeredLayout {
     def layerGap:double 120.0
     def nodeGap:double 32.0
     def sweeps:int 6
+    ; The ordering stops early when a sweep finds no crossing at all, and
+    ; gives up on sweeps that stop improving: this many in a row that do
+    ; not beat the best order so far end the search.
+    def patience:int 3
+    ; Never more sweeps than this, however much they keep improving.
+    def maxSweeps:int 24
+    ; How much work the crossing reduction may do, in edge pairs looked at,
+    ; before it settles for the best order it has. A layout runs on a
+    ; browser's main thread: a graph nobody could read anyway should cost a
+    ; frame or two, not freeze the tab.
+    def orderBudget:int 3000000
+    def orderWork:int 0
+    ; What the ordering ended with: crossings between neighbouring layers of
+    ; the vertex graph (dummies included), as the seed had them and as left.
+    def seedCrossings:int 0
+    def finalCrossings:int 0
+    ; Off, the ordering is the plain fixed number of barycentre sweeps it
+    ; always was, kept for measuring against.
+    def keepBest:boolean true
+    ; Fresh starts the search may make, from shuffled orders, while
+    ; crossings are left and the budget lasts. Seeded, so the same chart is
+    ; always the same picture.
+    def restarts:int 8
     def originX:double 0.0
     def originY:double 0.0
     ; The cross-axis room one routed edge takes in a layer it passes through.
@@ -107,7 +133,8 @@ class LayeredLayout {
     ; box, line, box, line. On, such vertices step aside — after the ones
     ; with a say, in the order they had — so a chain and the long edges
     ; that follow it stay together, and the boxes that lead nowhere stand
-    ; to the side of them.
+    ; to the side of them — past the long edges, but not past the real
+    ; nodes they were written among (see `sortLayer`).
     def unconnectedAside:boolean false
     ; Nodes (by index) that are never to go backwards: each keeps a layer
     ; no earlier than the one before it in this list, unless an edge path
@@ -139,6 +166,9 @@ class LayeredLayout {
     def edgeLooseSource:[boolean]
     def edgeLooseTarget:[boolean]
 
+    ; the vertices of each layer: layerVerts[layerStart[l] …]
+    def layerStart:[int]
+    def layerVerts:[int]
     ; per node
     def layerOf:[int]
     def orderOf:[int]
@@ -848,22 +878,626 @@ class LayeredLayout {
     ; long edge is now something the sweep can move out of the way.
     fn orderVertices:void () {
         this.seedVertexOrder()
+        this.buildLayerLists()
         def lc:int (this.layerCount())
-        def sweep:int 0
-        while (sweep < sweeps) {
-            def down:boolean true
-            if ((sweep % 2) == 1) {
-                down = false
+        orderWork = 0
+        if (keepBest == false) {
+            def sweep:int 0
+            while (sweep < sweeps) {
+                def down:boolean ((sweep % 2) == 0)
+                def l2:int 0
+                while (l2 < lc) {
+                    this.sortLayer(l2 down)
+                    l2 = (l2 + 1)
+                }
+                sweep = (sweep + 1)
             }
+            seedCrossings = -1
+            finalCrossings = (this.countCrossings())
+        } {
+            this.reduceCrossings()
+        }
+        this.deriveNodeOrder()
+    }
+
+    ; The crossing reduction, judged. The barycentre sweeps run as they
+    ; always did — they are what puts a long edge's dummies beside the
+    ; nodes they run past, which is what keeps a chain straight — but every
+    ; sweep is counted and the order kept is the last one with the fewest
+    ; crossings, not merely the last one. While they keep improving they
+    ; get more sweeps, up to `maxSweeps`; once `patience` sweeps in a row
+    ; find nothing better, they stop.
+    ;
+    ; The seed — the order the chart was written in — is taken instead only
+    ; when it has strictly fewer crossings than anything the sweeps found.
+    ;
+    ; After that, adjacent vertices are swapped where that removes a
+    ; crossing (Gansner et al.'s transpose): the barycentre puts two
+    ; vertices with the same key in an arbitrary order, and a swap is what
+    ; settles a tie the right way round. Only a strict improvement swaps.
+    fn reduceCrossings:void () {
+        def seedOrder:[int] (this.copyOrder())
+        seedCrossings = (this.countCrossings())
+        def bestCount:int (this.searchFromHere(seedCrossings))
+        def best:[int] (this.copyOrder())
+        ; A local search ends where it ends: a drawing that needs two layers
+        ; turned round at once is out of reach of any one move. Started
+        ; again from elsewhere, it often is not — so while crossings are
+        ; left and the budget lasts, try again from the order a depth-first
+        ; walk down the chart meets the vertices in, and from the written
+        ; order mirrored. A restart replaces the result only when it is
+        ; strictly better, so on a tie the written order wins.
+        def tries:int (2 + restarts)
+        def rng:int 7919
+        def start:int 0
+        while ((bestCount > 0) && (start < tries)) {
+            if (orderWork > orderBudget) {
+                start = tries
+            } {
+                if (start == 0) {
+                    this.seedDepthFirst()
+                }
+                if (start == 1) {
+                    this.restoreOrder(seedOrder)
+                    this.mirrorOrder()
+                }
+                if (start >= 2) {
+                    rng = (this.shuffleOrder(rng))
+                }
+                def again:int (this.searchFromHere((this.countCrossings())))
+                if (again < bestCount) {
+                    bestCount = again
+                    best = (this.copyOrder())
+                }
+                start = (start + 1)
+            }
+        }
+        this.restoreOrder(best)
+        finalCrossings = bestCount
+    }
+
+    ; Sweeps and local moves from the order the vertices have now; leaves
+    ; the best order found in place and returns its crossings.
+    fn searchFromHere:int (startCount:int) {
+        def lc:int (this.layerCount())
+        def seedOrder:[int] (this.copyOrder())
+        def seedCount:int startCount
+        def best:[int] seedOrder
+        def bestCount:int -1
+        def sweep:int 0
+        def idle:int 0
+        def limit:int maxSweeps
+        if (sweeps > limit) {
+            limit = sweeps
+        }
+        while (sweep < limit) {
+            def down:boolean ((sweep % 2) == 0)
             def l2:int 0
             while (l2 < lc) {
                 this.sortLayer(l2 down)
                 l2 = (l2 + 1)
             }
+            def now:int (this.countCrossings())
+            if ((bestCount < 0) || (now < bestCount)) {
+                bestCount = now
+                best = (this.copyOrder())
+                idle = 0
+            } {
+                if (now == bestCount) {
+                    best = (this.copyOrder())
+                }
+                idle = (idle + 1)
+            }
             sweep = (sweep + 1)
+            if (sweep >= sweeps) {
+                if (bestCount == 0) {
+                    sweep = limit
+                }
+                if (idle >= patience) {
+                    sweep = limit
+                }
+            }
+            if (orderWork > orderBudget) {
+                sweep = limit
+            }
         }
-        ; The node-level order is what the tests and any caller read, so it is
-        ; derived back out once the vertices have settled.
+        if ((bestCount < 0) || (seedCount < bestCount)) {
+            best = seedOrder
+            bestCount = seedCount
+        }
+        this.restoreOrder(best)
+        ; Then the local moves, in turns, for as long as a turn helps.
+        def round:int 0
+        while ((bestCount > 0) && (round < 4)) {
+            this.transpose()
+            this.sift()
+            def after:int (this.countCrossings())
+            if (after < bestCount) {
+                bestCount = after
+                best = (this.copyOrder())
+                round = (round + 1)
+            } {
+                this.restoreOrder(best)
+                round = 4
+            }
+            if (orderWork > orderBudget) {
+                round = 4
+            }
+        }
+        return bestCount
+    }
+
+    ; Every layer in a shuffled order (Park–Miller, so every target shuffles
+    ; alike). Returns the generator's next state.
+    fn shuffleOrder:int (state:int) {
+        def st:int state
+        def lc:int (this.layerCount())
+        def l:int 0
+        while (l < lc) {
+            def seq:[int] (this.layerInOrder(l))
+            def i:int ((array_length seq) - 1)
+            while (i > 0) {
+                st = ((st * 16807) % 2147483647)
+                def j:int (st % (i + 1))
+                def t:int (itemAt seq i)
+                set_at seq i (itemAt seq j)
+                set_at seq j t
+                i = (i - 1)
+            }
+            def z:int 0
+            while (z < (array_length seq)) {
+                set_at vOrder (itemAt seq z) z
+                z = (z + 1)
+            }
+            l = (l + 1)
+        }
+        return st
+    }
+
+    ; Every layer read the other way round.
+    fn mirrorOrder:void () {
+        def lc:int (this.layerCount())
+        def l:int 0
+        while (l < lc) {
+            def size:int ((itemAt layerStart (l + 1)) - (itemAt layerStart l))
+            def i:int (itemAt layerStart l)
+            while (i < (itemAt layerStart (l + 1))) {
+                def v:int (itemAt layerVerts i)
+                set_at vOrder v ((size - 1) - (itemAt vOrder v))
+                i = (i + 1)
+            }
+            l = (l + 1)
+        }
+    }
+
+    ; The order a depth-first walk meets the vertices in, layer by layer:
+    ; from each vertex of the top layer in turn (in the order it has), down
+    ; its edges in the order they were written. A subtree is kept together,
+    ; which is the order a tree-like chart wants and one the barycentre
+    ; sweeps do not always find from a shuffled start.
+    fn seedDepthFirst:void () {
+        def lc:int (this.layerCount())
+        def n:int (this.vertexCount())
+        def next:[int]
+        def l:int 0
+        while (l < lc) {
+            push next 0
+            l = (l + 1)
+        }
+        def seen:[boolean]
+        def v:int 0
+        while (v < n) {
+            push seen false
+            v = (v + 1)
+        }
+        def roots:[int]
+        def layer:int 0
+        while (layer < lc) {
+            def inLayer:[int] (this.layerInOrder(layer))
+            def r:int 0
+            while (r < (array_length inLayer)) {
+                push roots (itemAt inLayer r)
+                r = (r + 1)
+            }
+            layer = (layer + 1)
+        }
+        def stack:[int]
+        def ri:int 0
+        while (ri < (array_length roots)) {
+            def root:int (itemAt roots ri)
+            if ((itemAt seen root) == false) {
+                push stack root
+                while ((array_length stack) > 0) {
+                    def top:int (itemAt stack ((array_length stack) - 1))
+                    removeLast stack
+                    if ((itemAt seen top) == false) {
+                        set_at seen top true
+                        def tl:int (itemAt vLayer top)
+                        set_at vOrder top (itemAt next tl)
+                        set_at next tl ((itemAt next tl) + 1)
+                        ; the children pushed last-written first, so the
+                        ; first-written is walked first
+                        def kids:[int]
+                        def at:int (itemAt vOutHead top)
+                        while (at >= 0) {
+                            push kids (itemAt vOutTo at)
+                            at = (itemAt vOutNext at)
+                        }
+                        def kk:int 0
+                        while (kk < (array_length kids)) {
+                            def kid:int (itemAt kids kk)
+                            if ((itemAt seen kid) == false) {
+                                push stack kid
+                            }
+                            kk = (kk + 1)
+                        }
+                    }
+                }
+            }
+            ri = (ri + 1)
+        }
+    }
+
+    fn copyOrder:[int] () {
+        def out:[int]
+        def i:int 0
+        while (i < (array_length vOrder)) {
+            push out (itemAt vOrder i)
+            i = (i + 1)
+        }
+        return out
+    }
+
+    fn restoreOrder:void (saved:[int]) {
+        def i:int 0
+        while (i < (array_length saved)) {
+            set_at vOrder i (itemAt saved i)
+            i = (i + 1)
+        }
+    }
+
+    ; Which vertices stand in each layer. The membership never changes while
+    ; the ordering runs, so it is worked out once rather than by walking
+    ; every vertex for every layer of every sweep.
+    fn buildLayerLists:void () {
+        clear layerStart
+        clear layerVerts
+        def lc:int (this.layerCount())
+        def n:int (this.vertexCount())
+        def counts:[int]
+        def i:int 0
+        while (i <= lc) {
+            push counts 0
+            i = (i + 1)
+        }
+        def v:int 0
+        while (v < n) {
+            def l:int (itemAt vLayer v)
+            set_at counts l ((itemAt counts l) + 1)
+            v = (v + 1)
+        }
+        def acc:int 0
+        def k:int 0
+        while (k <= lc) {
+            push layerStart acc
+            if (k < lc) {
+                acc = (acc + (itemAt counts k))
+            }
+            k = (k + 1)
+        }
+        def fill:[int]
+        def j:int 0
+        while (j < n) {
+            push layerVerts -1
+            j = (j + 1)
+        }
+        def f:int 0
+        while (f < lc) {
+            push fill (itemAt layerStart f)
+            f = (f + 1)
+        }
+        def u:int 0
+        while (u < n) {
+            def lu:int (itemAt vLayer u)
+            set_at layerVerts (itemAt fill lu) u
+            set_at fill lu ((itemAt fill lu) + 1)
+            u = (u + 1)
+        }
+    }
+
+    ; A layer's vertices, by their current order.
+    fn layerInOrder:[int] (layer:int) {
+        def raw:[int]
+        def out:[int]
+        def from:int (itemAt layerStart layer)
+        def end:int (itemAt layerStart (layer + 1))
+        def size:int (end - from)
+        def i:int from
+        while (i < end) {
+            push raw (itemAt layerVerts i)
+            push out -1
+            i = (i + 1)
+        }
+        ; the orders in a layer are 0 … size-1, so each vertex has a slot;
+        ; anything else falls back to sorting
+        def clean:boolean true
+        def k:int 0
+        while (k < size) {
+            def v:int (itemAt raw k)
+            def o:int (itemAt vOrder v)
+            if ((o < 0) || (o >= size)) {
+                clean = false
+                k = size
+            } {
+                if ((itemAt out o) >= 0) {
+                    clean = false
+                    k = size
+                } {
+                    set_at out o v
+                    k = (k + 1)
+                }
+            }
+        }
+        if clean {
+            return out
+        }
+        return (this.byOrder(raw))
+    }
+
+    ; Crossings between every pair of neighbouring layers: for each layer,
+    ; its edges to the next sorted by where they start, and the inversions
+    ; among where they end counted with a Fenwick tree (Barth, Jünger and
+    ; Mutzel's accumulator) — E log V rather than E squared.
+    fn countCrossings:int () {
+        def lc:int (this.layerCount())
+        def total:int 0
+        def l:int 0
+        while (l < (lc - 1)) {
+            total = (total + (this.crossingsBelow(l)))
+            l = (l + 1)
+        }
+        return total
+    }
+
+    fn crossingsBelow:int (layer:int) {
+        def upper:[int] (this.layerInOrder(layer))
+        def size:int ((itemAt layerStart (layer + 2)) - (itemAt layerStart (layer + 1)))
+        if (size < 2) {
+            return 0
+        }
+        ; the ends, in the order of the upper vertices and, for one upper
+        ; vertex, of the lower ones
+        def ends:[int]
+        def i:int 0
+        while (i < (array_length upper)) {
+            def u:int (itemAt upper i)
+            def from:int (array_length ends)
+            def at:int (itemAt vOutHead u)
+            while (at >= 0) {
+                def w:int (itemAt vOutTo at)
+                if ((itemAt vLayer w) == (layer + 1)) {
+                    push ends (itemAt vOrder w)
+                }
+                at = (itemAt vOutNext at)
+            }
+            ; insertion sort of this vertex's own ends: a handful
+            def a:int (from + 1)
+            while (a < (array_length ends)) {
+                def key:int (itemAt ends a)
+                def b:int (a - 1)
+                while (b >= from) {
+                    if ((itemAt ends b) > key) {
+                        set_at ends (b + 1) (itemAt ends b)
+                        b = (b - 1)
+                    } {
+                        break
+                    }
+                }
+                set_at ends (b + 1) key
+                a = (a + 1)
+            }
+            i = (i + 1)
+        }
+        def m:int (array_length ends)
+        orderWork = (orderWork + m)
+        if (m < 2) {
+            return 0
+        }
+        ; Fenwick tree over the lower layer's positions; walking the ends
+        ; backwards, each counts the ends already seen that land left of it
+        def tree:[int]
+        def t:int 0
+        while (t <= size) {
+            push tree 0
+            t = (t + 1)
+        }
+        def crossings:int 0
+        def j:int (m - 1)
+        while (j >= 0) {
+            def pos:int (itemAt ends j)
+            ; how many seen so far are strictly smaller than pos
+            def q:int pos
+            while (q > 0) {
+                crossings = (crossings + (itemAt tree q))
+                q = (q - (bit_and q (0 - q)))
+            }
+            def r:int (pos + 1)
+            while (r <= size) {
+                set_at tree r ((itemAt tree r) + 1)
+                r = (r + (bit_and r (0 - r)))
+            }
+            j = (j - 1)
+        }
+        return crossings
+    }
+
+    ; Crossings between the edges of u and the edges of w, u standing left
+    ; of w, towards one neighbouring layer.
+    fn pairCrossings:int (u:int w:int useIncoming:boolean) {
+        def count:int 0
+        def au:int -1
+        if useIncoming {
+            au = (itemAt vInHead u)
+        } {
+            au = (itemAt vOutHead u)
+        }
+        while (au >= 0) {
+            def ou:int 0
+            if useIncoming {
+                ou = (itemAt vOrder (itemAt vInFrom au))
+                au = (itemAt vInNext au)
+            } {
+                ou = (itemAt vOrder (itemAt vOutTo au))
+                au = (itemAt vOutNext au)
+            }
+            def aw:int -1
+            if useIncoming {
+                aw = (itemAt vInHead w)
+            } {
+                aw = (itemAt vOutHead w)
+            }
+            while (aw >= 0) {
+                def ow:int 0
+                if useIncoming {
+                    ow = (itemAt vOrder (itemAt vInFrom aw))
+                    aw = (itemAt vInNext aw)
+                } {
+                    ow = (itemAt vOrder (itemAt vOutTo aw))
+                    aw = (itemAt vOutNext aw)
+                }
+                if (ou > ow) {
+                    count = (count + 1)
+                }
+                orderWork = (orderWork + 1)
+            }
+        }
+        return count
+    }
+
+    ; Swap neighbours in a layer wherever that removes crossings, layer by
+    ; layer, until a pass changes nothing or the budget is spent. Only a
+    ; strict improvement swaps, so equal pairs keep the order they had.
+    fn transpose:void () {
+        def lc:int (this.layerCount())
+        def improved:boolean true
+        def pass:int 0
+        while improved {
+            improved = false
+            def l:int 0
+            while (l < lc) {
+                def seq:[int] (this.layerInOrder(l))
+                def i:int 0
+                while (i < ((array_length seq) - 1)) {
+                    def u:int (itemAt seq i)
+                    def w:int (itemAt seq (i + 1))
+                    def before:int ((this.pairCrossings(u w true)) + (this.pairCrossings(u w false)))
+                    def after:int ((this.pairCrossings(w u true)) + (this.pairCrossings(w u false)))
+                    if (after < before) {
+                        def ou:int (itemAt vOrder u)
+                        set_at vOrder u (itemAt vOrder w)
+                        set_at vOrder w ou
+                        set_at seq i w
+                        set_at seq (i + 1) u
+                        improved = true
+                    }
+                    i = (i + 1)
+                }
+                l = (l + 1)
+            }
+            pass = (pass + 1)
+            if (pass >= 12) {
+                improved = false
+            }
+            if (orderWork > orderBudget) {
+                improved = false
+            }
+        }
+    }
+
+    ; Sifting (Matuszewski, Schönfeld and Molitor): each vertex in turn is
+    ; taken out of its layer and tried in every place in it, and put back
+    ; where it crosses least. Transpose only ever swaps neighbours, so a
+    ; vertex that belongs three places over has to get there through two
+    ; places that are each worse — and never does. Sifting moves it in one
+    ; step. The cost of a place is counted from the pairs alone: moving v
+    ; past w changes the crossings by c(w,v) − c(v,w).
+    fn sift:void () {
+        def lc:int (this.layerCount())
+        def l:int 0
+        while (l < lc) {
+            def seq:[int] (this.layerInOrder(l))
+            def size:int (array_length seq)
+            if (size > 2) {
+                def i:int 0
+                while (i < size) {
+                    if (orderWork > orderBudget) {
+                        return
+                    }
+                    def v:int (itemAt seq i)
+                    ; the others, in order, without v
+                    def rest:[int]
+                    def r:int 0
+                    while (r < size) {
+                        if ((itemAt seq r) != v) {
+                            push rest (itemAt seq r)
+                        }
+                        r = (r + 1)
+                    }
+                    ; v before everything, then moved past one at a time;
+                    ; `cost` is relative, only the differences matter
+                    def cost:int 0
+                    def bestCost:int 0
+                    def bestAt:int 0
+                    def here:int 0
+                    def wi:int 0
+                    while (wi < (size - 1)) {
+                        def w:int (itemAt rest wi)
+                        def vw:int ((this.pairCrossings(v w true)) + (this.pairCrossings(v w false)))
+                        def wv:int ((this.pairCrossings(w v true)) + (this.pairCrossings(w v false)))
+                        cost = (cost + (wv - vw))
+                        if (cost < bestCost) {
+                            bestCost = cost
+                            bestAt = (wi + 1)
+                        }
+                        ; where v stands now counts as a candidate at its
+                        ; own cost, so a tie keeps it where it was
+                        if ((wi + 1) == i) {
+                            here = cost
+                        }
+                        wi = (wi + 1)
+                    }
+                    if (bestCost < here) {
+                        def o:int 0
+                        def placed:int 0
+                        while (o < (size - 1)) {
+                            if (o == bestAt) {
+                                set_at seq placed v
+                                placed = (placed + 1)
+                            }
+                            set_at seq placed (itemAt rest o)
+                            placed = (placed + 1)
+                            o = (o + 1)
+                        }
+                        if (bestAt == (size - 1)) {
+                            set_at seq placed v
+                        }
+                        def z:int 0
+                        while (z < size) {
+                            set_at vOrder (itemAt seq z) z
+                            z = (z + 1)
+                        }
+                    }
+                    i = (i + 1)
+                }
+            }
+            l = (l + 1)
+        }
+    }
+
+    ; The node-level order is what the tests and any caller read, so it is
+    ; derived back out once the vertices have settled.
+    fn deriveNodeOrder:void () {
+        def lc:int (this.layerCount())
         clear orderOf
         def n:int (graph.nodeCount())
         def z:int 0
@@ -881,11 +1515,13 @@ class LayeredLayout {
         def r:int 0
         while (r < (array_length ranked)) {
             def vi:int (itemAt ranked r)
-            def ni:int (itemAt vNode vi)
-            if (ni >= 0) {
-                def li:int (itemAt vLayer vi)
-                set_at orderOf ni (itemAt seen li)
-                set_at seen li ((itemAt seen li) + 1)
+            if (vi >= 0) {
+                def ni:int (itemAt vNode vi)
+                if (ni >= 0) {
+                    def li:int (itemAt vLayer vi)
+                    set_at orderOf ni (itemAt seen li)
+                    set_at seen li ((itemAt seen li) + 1)
+                }
             }
             r = (r + 1)
         }
@@ -894,21 +1530,23 @@ class LayeredLayout {
     fn sortLayer:void (layer:int useIncoming:boolean) {
         def raw:[int]
         def aside:[int]
-        def v:int 0
-        while (v < (this.vertexCount())) {
-            if ((itemAt vLayer v) == layer) {
-                def take:boolean true
-                if unconnectedAside {
-                    if ((this.neighbourCount(v useIncoming)) == 0) {
-                        push aside v
-                        take = false
-                    }
-                }
-                if take {
-                    push raw v
+        def asideAt:[int]
+        def everyone:[int] (this.layerInOrder(layer))
+        def v0:int 0
+        while (v0 < (array_length everyone)) {
+            def v:int (itemAt everyone v0)
+            def take:boolean true
+            if unconnectedAside {
+                if ((this.neighbourCount(v useIncoming)) == 0) {
+                    push aside v
+                    push asideAt v0
+                    take = false
                 }
             }
-            v = (v + 1)
+            if take {
+                push raw v
+            }
+            v0 = (v0 + 1)
         }
         ; Start from the order the last sweep (or the seed) left, not from
         ; vertex insertion order. Dummies are created after the nodes, so
@@ -923,8 +1561,6 @@ class LayeredLayout {
             push keys (this.barycentre((itemAt members ki) useIncoming))
             ki = (ki + 1)
         }
-        ; The ones stepping aside go last, in the order they had.
-        def sideSorted:[int] (this.byOrder(aside))
         def n:int (array_length members)
         ; Insertion sort: a layer is small, and a stable sort keeps vertices
         ; with no neighbours where the previous sweep left them.
@@ -960,15 +1596,56 @@ class LayeredLayout {
             set_at members at mv
             i = (i + 1)
         }
+        ; The ones with nothing to say about this side step aside — past the
+        ; long edges' dummies, so a chain and the edges that follow it stay
+        ; together — but not past the real nodes they were written among:
+        ; each goes just before the real node that followed it, or last when
+        ; none did. Sending them all to the end of the layer put a leaf
+        ; written between two siblings after both: A → B, C, D with only B
+        ; and D going on was drawn B D C.
+        def anchor:[int]
+        def p:int 0
+        while (p < (array_length aside)) {
+            def found:int -1
+            def q:int ((itemAt asideAt p) + 1)
+            while (q < (array_length everyone)) {
+                def cand:int (itemAt everyone q)
+                if ((itemAt vNode cand) >= 0) {
+                    if ((this.neighbourCount(cand useIncoming)) > 0) {
+                        found = cand
+                        q = (array_length everyone)
+                    }
+                }
+                q = (q + 1)
+            }
+            push anchor found
+            p = (p + 1)
+        }
+        def slot:int 0
         def k:int 0
         while (k < n) {
-            set_at vOrder (itemAt members k) k
+            def mv2:int (itemAt members k)
+            if ((itemAt vNode mv2) >= 0) {
+                def x:int 0
+                while (x < (array_length aside)) {
+                    if ((itemAt anchor x) == mv2) {
+                        set_at vOrder (itemAt aside x) slot
+                        slot = (slot + 1)
+                    }
+                    x = (x + 1)
+                }
+            }
+            set_at vOrder mv2 slot
+            slot = (slot + 1)
             k = (k + 1)
         }
-        def a:int 0
-        while (a < (array_length sideSorted)) {
-            set_at vOrder (itemAt sideSorted a) (n + a)
-            a = (a + 1)
+        def y:int 0
+        while (y < (array_length aside)) {
+            if ((itemAt anchor y) < 0) {
+                set_at vOrder (itemAt aside y) slot
+                slot = (slot + 1)
+            }
+            y = (y + 1)
         }
     }
 

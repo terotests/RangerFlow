@@ -59,6 +59,12 @@ Import "../core/GraphModel.rgr"
 Import "../core/EdgeRouter.rgr"
 
 class EdgeLanes {
+    ; The straight runs of every edge as drawn, for the straight-lane
+    ; search to count crossings against: x1 y1 x2 y2 per run, flat, and the
+    ; edge each run belongs to (-1 once that edge has moved and its runs
+    ; were drawn again at the end). Built once per `slideToClear`.
+    def runFlat:[double]
+    def runOwner:[int]
     ; How far apart two tracks have to be to read as two lines.
     def spacing:double 14.0
     ; Kept clear of the corridor's walls so a track never touches a node.
@@ -341,15 +347,48 @@ class EdgeLanes {
     ; neighbour it had just missed still reads as a line drawn along that
     ; box. Sibling sockets keep `fanGap`.
     fn slideToClear:int (g:FlowGraph) {
+        clear runFlat
+        clear runOwner
+        def r:int 0
+        while (r < (g.edgeCount())) {
+            this.addRuns(g r)
+            r = (r + 1)
+        }
         def moved:int 0
         def k:int 0
         while (k < (g.edgeCount())) {
             if (this.slideEdge(g k)) {
                 moved = (moved + 1)
+                ; its old runs are no longer on the page
+                def q:int 0
+                while (q < (array_length runOwner)) {
+                    if ((itemAt runOwner q) == k) {
+                        set_at runOwner q -1
+                    }
+                    q = (q + 1)
+                }
+                this.addRuns(g k)
             }
             k = (k + 1)
         }
         return moved
+    }
+
+    fn addRuns:void (g:FlowGraph k:int) {
+        def o:FlowEdge (g.edgeAt(k))
+        if ((o.hidden == false) && ((o.sourceIndex >= 0) && (o.targetIndex >= 0))) {
+            def c:[double] (EdgeRouter.cornersFor(g o))
+            def n:int (idiv (array_length c) 2)
+            def i:int 1
+            while (i < n) {
+                push runFlat (itemAt c ((i - 1) * 2))
+                push runFlat (itemAt c (((i - 1) * 2) + 1))
+                push runFlat (itemAt c (i * 2))
+                push runFlat (itemAt c ((i * 2) + 1))
+                push runOwner k
+                i = (i + 1)
+            }
+        }
     }
 
     fn slideEdge:boolean (g:FlowGraph idx:int) {
@@ -449,6 +488,11 @@ class EdgeLanes {
                 }
             }
         }
+        ; A straight line is not worth a crossing: the sockets the fan
+        ; chose keep the lines apart, and a run that jumps a neighbour's
+        ; socket to be straight can cut through that neighbour's line.
+        def runs:[double] (this.otherRuns(g idx lo hi a0 a1 vertical))
+        def crossNow:int (this.crossesNow(g e runs))
         def best:double cur
         def found:boolean false
         def bestClear:double -1.0
@@ -459,7 +503,7 @@ class EdgeLanes {
             if (x > hi) {
                 x = hi
             }
-            if (this.laneOpen(g e vertical x a0 a1)) {
+            if ((this.laneOpen(g e vertical x a0 a1)) && ((EdgeLanes.straightCrossings(runs vertical x a0 a1)) <= crossNow)) {
                 if ((this.sideBusy(g e idx vertical x)) == false) {
                     def clearance:double (this.laneClearance(g e vertical x a0 a1))
                     def d:double (fabs (x - cur))
@@ -622,6 +666,94 @@ class EdgeLanes {
         return true
     }
 
+    ; The straight runs of every other visible edge, as drawn now, for
+    ; `crossesAt`: x1 y1 x2 y2 per run, flat.
+    fn otherRuns:[double] (g:FlowGraph skipIdx:int lo:double hi:double a0:double a1:double vertical:boolean) {
+        ; only the runs that reach into the box the candidates lie in, and
+        ; the box the edge is drawn in now — nothing else can be crossed
+        def own:[double] (EdgeRouter.cornersFor(g (g.edgeAt(skipIdx))))
+        def bx1:double lo
+        def bx2:double hi
+        def by1:double a0
+        def by2:double a1
+        if (vertical == false) {
+            bx1 = a0
+            bx2 = a1
+            by1 = lo
+            by2 = hi
+        }
+        def p:int 0
+        while (p < (array_length own)) {
+            def px:double (itemAt own p)
+            def py:double (itemAt own (p + 1))
+            if (px < bx1) { bx1 = px }
+            if (px > bx2) { bx2 = px }
+            if (py < by1) { by1 = py }
+            if (py > by2) { by2 = py }
+            p = (p + 2)
+        }
+        def runs:[double]
+        def r:int 0
+        while (r < (array_length runOwner)) {
+            def owner:int (itemAt runOwner r)
+            if ((owner >= 0) && (owner != skipIdx)) {
+                def at:int (r * 4)
+                def x1:double (itemAt runFlat at)
+                def y1:double (itemAt runFlat (at + 1))
+                def x2:double (itemAt runFlat (at + 2))
+                def y2:double (itemAt runFlat (at + 3))
+                def keep:boolean true
+                if ((x1 < bx1) && (x2 < bx1)) { keep = false }
+                if ((x1 > bx2) && (x2 > bx2)) { keep = false }
+                if ((y1 < by1) && (y2 < by1)) { keep = false }
+                if ((y1 > by2) && (y2 > by2)) { keep = false }
+                if keep {
+                    push runs x1
+                    push runs y1
+                    push runs x2
+                    push runs y2
+                }
+            }
+            r = (r + 1)
+        }
+        return runs
+    }
+
+    ; How many of `runs` the segment crosses.
+    sfn crossesRuns:int (runs:[double] x1:double y1:double x2:double y2:double) {
+        def count:int 0
+        def r:int 0
+        while (r < (array_length runs)) {
+            def hit:[double] (EdgeOverlap.crossingOf(x1 y1 x2 y2 (itemAt runs r) (itemAt runs (r + 1)) (itemAt runs (r + 2)) (itemAt runs (r + 3))))
+            if ((array_length hit) == 2) {
+                count = (count + 1)
+            }
+            r = (r + 4)
+        }
+        return count
+    }
+
+    ; …a straight run at `pos`, from `a0` to `a1` along the flow…
+    sfn straightCrossings:int (runs:[double] vertical:boolean pos:double a0:double a1:double) {
+        if vertical {
+            return (EdgeLanes.crossesRuns(runs pos a0 pos a1))
+        }
+        return (EdgeLanes.crossesRuns(runs a0 pos a1 pos))
+    }
+
+    ; …and how many the edge crosses as it is drawn now.
+    fn crossesNow:int (g:FlowGraph e:FlowEdge runs:[double]) {
+        def c:[double] (EdgeRouter.cornersFor(g e))
+        def n:int (idiv (array_length c) 2)
+        def count:int 0
+        def i:int 1
+        while (i < n) {
+            count = (count + (EdgeLanes.crossesRuns(runs (itemAt c ((i - 1) * 2)) (itemAt c (((i - 1) * 2) + 1)) (itemAt c (i * 2)) (itemAt c ((i * 2) + 1)))))
+            i = (i + 1)
+        }
+        return count
+    }
+
     ; Another edge already sitting on this side, close enough that landing
     ; here would draw two lines as one.
     fn sideBusy:boolean (g:FlowGraph e:FlowEdge skipIdx:int vertical:boolean at:double) {
@@ -780,7 +912,7 @@ class EdgeLanes {
                             if (EdgeLanes.alongX(side)) {
                                 along = (g.endpointX(e2 far))
                             }
-                            push keys along
+                            push keys (EdgeLanes.cornerKey(g e2 (itemAt atSource j) side along))
                         }
                         j = (j + 1)
                     }
@@ -807,6 +939,39 @@ class EdgeLanes {
         }
         this.slideRoutedEnds(g)
         return moved
+    }
+
+    ; The key a slot is sorted by when its line turns ONE corner: out of a
+    ; flank and into the top of a box below, say. Such lines do not cross
+    ; each other when the one that turns furthest away leaves furthest from
+    ; where they are all going — out of the right flank to boxes below, the
+    ; furthest leaves from the top of the flank, so its run passes over the
+    ; others' corners instead of through their legs. Sorting by where the
+    ; far end is along the side put them all at the same place (the boxes
+    ; below share a top) and the order fell out as written: half the time,
+    ; crossed. A line that meets its far box flank to flank, or whose far
+    ; end lies alongside this side, keeps the plain key.
+    sfn cornerKey:double (g:FlowGraph e:FlowEdge here:boolean side:int along:double) {
+        def farSide:int (g.edgeSide(e (here == false)))
+        if ((EdgeLanes.alongX(farSide)) == (EdgeLanes.alongX(side))) {
+            return along
+        }
+        def owner:FlowNode (EdgeLanes.ownerOf(g e here))
+        def lo:double owner.y
+        def hi:double (owner.y + owner.height)
+        def perp:double (fabs ((g.endpointX(e (here == false))) - (g.endpointX(e here))))
+        if (EdgeLanes.alongX(side)) {
+            lo = owner.x
+            hi = (owner.x + owner.width)
+            perp = (fabs ((g.endpointY(e (here == false))) - (g.endpointY(e here))))
+        }
+        if (along < lo) {
+            return ((lo - 1000000.0) + perp)
+        }
+        if (along > hi) {
+            return ((hi + 1000000.0) - perp)
+        }
+        return along
     }
 
     ; Whether the side these slots are on is a box's flat side, with no
@@ -1613,6 +1778,12 @@ class EdgeLanes {
                 pass = count
             }
         }
+        ; Swapping neighbours stops where every single swap is worse, which
+        ; is not where the fewest crossings are: three lines converging on
+        ; one box from above and below need the outermost moved past two
+        ; others at once. So each track is also taken out and tried in every
+        ; place (sifting), and put where it crosses least; a tie keeps it.
+        EdgeLanes.siftTracks(order lo hi wallA wallB entry exit)
 
         ; The corridor is only as wide as the narrowest edge in it allows.
         def centre:double 0.0
@@ -1693,6 +1864,72 @@ class EdgeLanes {
             cost = (cost + 1)
         }
         return cost
+    }
+
+    ; Sifting over the tracks of one corridor, by `crossCost`. A few rounds
+    ; at most: a corridor holds a handful of tracks, and each round only
+    ; ever lowers the count.
+    sfn siftTracks:void (order:[int] lo:[double] hi:[double] wallA:[double] wallB:[double] entry:[double] exit:[double]) {
+        def count:int (array_length order)
+        if (count < 3) {
+            return
+        }
+        def round:int 0
+        while (round < 4) {
+            def improved:boolean false
+            def i:int 0
+            while (i < count) {
+                def v:int (itemAt order i)
+                def rest:[int]
+                def r:int 0
+                while (r < count) {
+                    if (r != i) {
+                        push rest (itemAt order r)
+                    }
+                    r = (r + 1)
+                }
+                def cost:int 0
+                def bestCost:int 0
+                def bestAt:int 0
+                def here:int 0
+                def w:int 0
+                while (w < (count - 1)) {
+                    def o:int (itemAt rest w)
+                    cost = (cost + ((EdgeLanes.crossCost(o v lo hi wallA wallB entry exit)) - (EdgeLanes.crossCost(v o lo hi wallA wallB entry exit))))
+                    if (cost < bestCost) {
+                        bestCost = cost
+                        bestAt = (w + 1)
+                    }
+                    if ((w + 1) == i) {
+                        here = cost
+                    }
+                    w = (w + 1)
+                }
+                if (bestCost < here) {
+                    def placed:int 0
+                    def q:int 0
+                    while (q < (count - 1)) {
+                        if (q == bestAt) {
+                            set_at order placed v
+                            placed = (placed + 1)
+                        }
+                        set_at order placed (itemAt rest q)
+                        placed = (placed + 1)
+                        q = (q + 1)
+                    }
+                    if (bestAt == (count - 1)) {
+                        set_at order placed v
+                    }
+                    improved = true
+                }
+                i = (i + 1)
+            }
+            if improved {
+                round = (round + 1)
+            } {
+                round = 4
+            }
+        }
     }
 
     sfn strictlyInside:boolean (v:double a:double b:double) {
