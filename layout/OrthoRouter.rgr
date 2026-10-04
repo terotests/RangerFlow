@@ -144,6 +144,20 @@ class OrthoRouter {
     ; Refuse rather than hang: the grid is (obstacles*2 + 2) per axis, plus
     ; two per straight run of every other edge.
     def maxAxis:int 240
+    ; The search first looks only at what stands near the edge: the boxes and
+    ; lines inside the rectangle its two ends span, grown by this much on
+    ; every side. A diagram of four hundred boxes put all of them in every
+    ; grid, the grid came out past `maxAxis`, and the repair was refused —
+    ; leaving the line drawn straight through a box. Near is nearly always
+    ; enough; when it is not (the route found still hits something outside
+    ; the window), the whole diagram is tried as before.
+    def window:double 360.0
+    ; the window the current attempt looks through; empty when none
+    def winX1:double 0.0
+    def winY1:double 0.0
+    def winX2:double 0.0
+    def winY2:double 0.0
+    def windowed:boolean false
     ; How far a route keeps from a line already drawn, and what running
     ; along one costs, as a multiple of the length run.
     def laneGap:double 14.0
@@ -374,18 +388,53 @@ class OrthoRouter {
         push stubs stub
         push stubs (stub * 0.4)
         push stubs 1.0
-        def p:int 0
-        while (p < (array_length pads)) {
-            def si:int 0
-            while (si < (array_length stubs)) {
-                if (this.routeEdgeAt(g e (itemAt pads p) (itemAt stubs si))) {
-                    return true
-                }
-                si = (si + 1)
+        ; near first, then everything
+        def pass:int 0
+        while (pass < 2) {
+            windowed = (pass == 0)
+            if windowed {
+                def x1:double (g.endpointX(e true))
+                def y1:double (g.endpointY(e true))
+                def x2:double (g.endpointX(e false))
+                def y2:double (g.endpointY(e false))
+                winX1 = ((EdgeLanes.lower(x1 x2)) - window)
+                winX2 = ((EdgeLanes.upper(x1 x2)) + window)
+                winY1 = ((EdgeLanes.lower(y1 y2)) - window)
+                winY2 = ((EdgeLanes.upper(y1 y2)) + window)
             }
-            p = (p + 1)
+            def p:int 0
+            while (p < (array_length pads)) {
+                def si:int 0
+                while (si < (array_length stubs)) {
+                    if (this.routeEdgeAt(g e (itemAt pads p) (itemAt stubs si))) {
+                        ; a route found through the window has only been
+                        ; kept clear of what is in the window
+                        if ((windowed == false) || ((this.crossesSomething(g e)) == false)) {
+                            windowed = false
+                            return true
+                        }
+                    }
+                    si = (si + 1)
+                }
+                p = (p + 1)
+            }
+            pass = (pass + 1)
         }
+        windowed = false
         return false
+    }
+
+    ; Whether a rectangle reaches into the current window (always, when
+    ; there is none).
+    fn inWindow:boolean (x:double y:double w:double h:double) {
+        if (windowed == false) {
+            return true
+        }
+        if ((x + w) < winX1) { return false }
+        if (x > winX2) { return false }
+        if ((y + h) < winY1) { return false }
+        if (y > winY2) { return false }
+        return true
     }
 
     fn routeEdgeAt:boolean (g:FlowGraph e:FlowEdge pad:double stubLen:double) {
@@ -482,7 +531,7 @@ class OrthoRouter {
         def i:int 0
         while (i < (g.nodeCount())) {
             def n:FlowNode (g.nodeAt(i))
-            if (this.blocksEdge(g n e)) {
+            if ((this.blocksEdge(g n e)) && (this.inWindow(n.x n.y n.width n.height))) {
                 def pad:double inflate
                 if (i == e.sourceIndex) { pad = own }
                 if (i == e.targetIndex) { pad = own }
@@ -535,7 +584,7 @@ class OrthoRouter {
                     if ((fabs (y1 - y2)) < 1.0) {
                         if ((fabs (x1 - x2)) > 4.0) { straight = true }
                     }
-                    if straight {
+                    if (straight && (this.inWindow((EdgeLanes.lower(x1 x2)) (EdgeLanes.lower(y1 y2)) (fabs (x2 - x1)) (fabs (y2 - y1))))) {
                         push tx1 x1
                         push ty1 y1
                         push tx2 x2

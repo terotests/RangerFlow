@@ -205,6 +205,7 @@ class FlowQualityTest {
         this.dense()
         this.scale()
         this.determinism()
+        this.memoization()
         this.layoutBudget()
         this.table()
         print ""
@@ -989,6 +990,111 @@ class FlowQualityTest {
             c.ok(("determinism/s" + (to_string seed) + ": the same text is the same picture") same)
             seed = (seed + 1)
         }
+    }
+
+    ; An order once found is not searched for again. Drawn twice through
+    ; one memo, a chart is the same picture the second time and the second
+    ; layout takes its order from the memo; with a label made longer, the
+    ; shape is the same, so is the order, and the boxes keep their places
+    ; across the flow relative to each other. A scene cache hands back the
+    ; very scene for a text it has drawn.
+    fn memoization:void () {
+        def memo:FlowLayoutMemo (FlowLayoutMemo.create())
+        def firstMs:double 0.0
+        def againMs:double 0.0
+        def seed:int 1
+        while (seed <= 12) {
+            def k:QCase (this.planarCase((500 + seed) false))
+            if ((seed % 2) == 0) {
+                k = (this.denseCase("memo" seed 30))
+            }
+            def plain:MermaidDrawing (MermaidRender.draw(k.src style))
+            def hitsBefore:int memo.hits
+            def t0:double (wall_clock_ms)
+            def a:MermaidDrawing (MermaidRender.drawWith(k.src style memo))
+            def t1:double (wall_clock_ms)
+            def b:MermaidDrawing (MermaidRender.drawWith(k.src style memo))
+            def t2:double (wall_clock_ms)
+            firstMs = (firstMs + (t1 - t0))
+            againMs = (againMs + (t2 - t1))
+            c.ok(("memo/" + (to_string seed) + ": the second drawing takes the order it found") (memo.hits > hitsBefore))
+            c.ok(("memo/" + (to_string seed) + ": and is the same picture as the first") (FlowQualityTest.samePlaces(a.graph b.graph)))
+            c.ok(("memo/" + (to_string seed) + ": which is the picture drawn without a memo") (FlowQualityTest.samePlaces(plain.graph a.graph)))
+            ; a label grows: same shape, same order
+            def relabelled:string (k.src + "    " + (FlowQualityTest.firstId(k.src)) + "[\"a label a good deal longer than it was\"]\n")
+            def hitsMid:int memo.hits
+            def r:MermaidDrawing (MermaidRender.drawWith(relabelled style memo))
+            c.ok(("memo/" + (to_string seed) + ": a longer label keeps the shape, and the order") (memo.hits > hitsMid))
+            c.ok(("memo/" + (to_string seed) + ": every layer in the order it had") (FlowQualityTest.sameOrder(a.graph r.graph k.vertical)))
+            seed = (seed + 1)
+        }
+        print ("  memo: first drawings " + (to_string (to_int firstMs)) + " ms, the same again " + (to_string (to_int againMs)) + " ms")
+        c.ok("memo: drawing again through the memo is cheaper" (againMs < firstMs))
+        def cache (new MermaidSceneCache)
+        def k2:QCase (this.denseCase("memo" 99 40))
+        def t3:double (wall_clock_ms)
+        def s1:FlowScene (cache.scene(k2.src "default" 0.0 8.0 0.0))
+        def t4:double (wall_clock_ms)
+        def s2:FlowScene (cache.scene(k2.src "default" 0.0 8.0 0.0))
+        def t5:double (wall_clock_ms)
+        print ("  scene cache: drawn in " + (to_string (to_int (t4 - t3))) + " ms, handed back in " + (to_string (t5 - t4)) + " ms")
+        c.ok("scene cache: the same text is the same scene, not drawn again" ((cache.hits == 1) && (cache.misses == 1)))
+        c.ok("scene cache: and it has items" ((array_length s2.items) == (array_length s1.items)))
+        def s3:FlowScene (cache.scene(k2.src "default" 400.0 8.0 0.0))
+        c.ok("scene cache: another width is another scene" (cache.misses == 2))
+    }
+
+    ; The first node id a case's text names.
+    sfn firstId:string (src:string) {
+        def lines:[string] (strsplit src "\n")
+        def first:string (trim (itemAt lines 1))
+        def cut:int (indexOf first " ")
+        return (substring first 0 cut)
+    }
+
+    sfn samePlaces:boolean (a:FlowGraph b:FlowGraph) {
+        if ((a.nodeCount()) != (b.nodeCount())) {
+            return false
+        }
+        def i:int 0
+        while (i < (a.nodeCount())) {
+            def na:FlowNode (a.nodeAt(i))
+            def nb:FlowNode (b.nodeAt(i))
+            if ((fabs (na.x - nb.x)) > 0.001) { return false }
+            if ((fabs (na.y - nb.y)) > 0.001) { return false }
+            i = (i + 1)
+        }
+        return true
+    }
+
+    ; Every pair of boxes in one layer in the same order across the flow.
+    sfn sameOrder:boolean (a:FlowGraph b:FlowGraph vertical:boolean) {
+        def i:int 0
+        while (i < (a.nodeCount())) {
+            def j:int 0
+            while (j < (a.nodeCount())) {
+                if (i != j) {
+                    def ai:FlowNode (a.nodeAt(i))
+                    def aj:FlowNode (a.nodeAt(j))
+                    def bi:FlowNode (b.nodeById(ai.id))
+                    def bj:FlowNode (b.nodeById(aj.id))
+                    def sameLayer:boolean ((fabs (ai.y - aj.y)) < 1.0)
+                    if (vertical == false) {
+                        sameLayer = ((fabs (ai.x - aj.x)) < 1.0)
+                    }
+                    if sameLayer {
+                        def before:boolean ((FlowQualityTest.crossOf(ai vertical)) < (FlowQualityTest.crossOf(aj vertical)))
+                        def after:boolean ((FlowQualityTest.crossOf(bi vertical)) < (FlowQualityTest.crossOf(bj vertical)))
+                        if (before != after) {
+                            return false
+                        }
+                    }
+                }
+                j = (j + 1)
+            }
+            i = (i + 1)
+        }
+        return true
     }
 
     ; The ordering step on its own, on graphs far larger than anybody

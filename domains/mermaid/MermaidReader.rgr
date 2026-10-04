@@ -989,6 +989,139 @@ class MermaidDiagram {
             }
             k = (k + 1)
         }
+        MermaidDiagram.settleCorners(g horiz)
+    }
+
+    ; The L's at one box agree with each other. Lines that meet a box's
+    ; flank come in level with the box; lines that meet its top come down
+    ; through the gap above it. A line from far away coming down to the top
+    ; passes every line from nearer by on its way — and one of those that
+    ; dropped past the gap to reach the flank is crossed. So of the lines
+    ; reaching a box from one side, only the outermost may use the flank:
+    ; walking in from the farthest, the first that goes to the top sends
+    ; every nearer one to the top too. The same holds for lines leaving.
+    sfn settleCorners:void (g:FlowGraph horiz:boolean) {
+        def n:int 0
+        while (n < (g.nodeCount())) {
+            def nd:FlowNode (g.nodeAt(n))
+            def end:int 0
+            while (end < 2) {
+                def atSource:boolean (end == 1)
+                def side:int 0
+                while (side < 2) {
+                    MermaidDiagram.settleSide(g n nd atSource (side == 0) horiz)
+                    side = (side + 1)
+                }
+                end = (end + 1)
+            }
+            n = (n + 1)
+        }
+    }
+
+    ; One box, one end (lines leaving it or reaching it), one side across
+    ; the flow (the other boxes before it, or after it).
+    sfn settleSide:void (g:FlowGraph n:int nd:FlowNode atSource:boolean before:boolean horiz:boolean) {
+        def picked:[int]
+        def dist:[double]
+        def k:int 0
+        while (k < (g.edgeCount())) {
+            def e:FlowEdge (g.edgeAt(k))
+            def mine:int e.targetIndex
+            def otherIdx:int e.sourceIndex
+            if atSource {
+                mine = e.sourceIndex
+                otherIdx = e.targetIndex
+            }
+            if ((mine == n) && ((otherIdx >= 0) && (otherIdx != n))) {
+                def o:FlowNode (g.nodeAt(otherIdx))
+                def across:double ((o.centerX()) - (nd.centerX()))
+                def gap:double (o.y - (nd.y + nd.height))
+                if (o.y < nd.y) {
+                    gap = (nd.y - (o.y + o.height))
+                }
+                if horiz {
+                    across = ((o.centerY()) - (nd.centerY()))
+                    gap = (o.x - (nd.x + nd.width))
+                    if (o.x < nd.x) {
+                        gap = (nd.x - (o.x + o.width))
+                    }
+                }
+                def onSide:boolean (across > 0.0)
+                if before {
+                    onSide = (across < 0.0)
+                }
+                if (onSide && (gap >= 24.0)) {
+                    push picked k
+                    push dist (fabs across)
+                }
+            }
+            k = (k + 1)
+        }
+        def count:int (array_length picked)
+        if (count < 2) {
+            return
+        }
+        ; farthest first
+        def order:[int]
+        def i:int 0
+        while (i < count) {
+            push order i
+            def j:int ((array_length order) - 1)
+            while (j > 0) {
+                def prev:int (itemAt order (j - 1))
+                if ((itemAt dist prev) < (itemAt dist i)) {
+                    set_at order j prev
+                    set_at order (j - 1) i
+                    j = (j - 1)
+                } {
+                    j = 0
+                }
+            }
+            i = (i + 1)
+        }
+        def flankOk:boolean true
+        def w:int 0
+        while (w < count) {
+            def e2:FlowEdge (g.edgeAt((itemAt picked (itemAt order w))))
+            def handle:int e2.targetHandle
+            if atSource {
+                handle = e2.sourceHandle
+            }
+            ; the flank across the flow: left / right in a column, top /
+            ; bottom in a row
+            def flank:boolean ((handle == 1) || (handle == 3))
+            if horiz {
+                flank = ((handle == 0) || (handle == 2))
+            }
+            if (flank == false) {
+                flankOk = false
+            } {
+                if (flankOk == false) {
+                    def a:FlowNode (g.nodeAt(e2.sourceIndex))
+                    def b:FlowNode (g.nodeAt(e2.targetIndex))
+                    if horiz {
+                        def dx:double ((b.centerX()) - (a.centerX()))
+                        if atSource {
+                            def keepH:int e2.targetHandle
+                            MermaidDiagram.faceAcross(e2 dx)
+                            e2.targetHandle = keepH
+                        } {
+                            MermaidDiagram.arriveAcross(e2 dx)
+                        }
+                    } {
+                        def dy:double ((b.centerY()) - (a.centerY()))
+                        if atSource {
+                            def keepT:int e2.targetHandle
+                            MermaidDiagram.faceDown(e2 dy)
+                            e2.targetHandle = keepT
+                        } {
+                            MermaidDiagram.arriveDown(e2 dy)
+                        }
+                    }
+                }
+            }
+            w = (w + 1)
+        }
     }
 
     ; The L for two boxes in different layers that stand well apart across
@@ -2752,6 +2885,11 @@ class MermaidFlow {
     }
 
     sfn styled:FlowGraph (d:MermaidDiagram style:FlowStyle) {
+        return (MermaidFlow.styledWith(d style (new FlowLayoutMemo)))
+    }
+
+    ; The same, with orders found before kept in `memo` — see `LayoutMemo`.
+    sfn styledWith:FlowGraph (d:MermaidDiagram style:FlowStyle memo:FlowLayoutMemo) {
         def g:FlowGraph (d.buildStyled(style))
         ; The subgraphs are laid out from the inside out — each group on its
         ; own, then as one box in its parent's layout — so a frame is as
@@ -2764,6 +2902,7 @@ class MermaidFlow {
         ; its defaults, which are these numbers.
         def cl:CompoundLayout (CompoundLayout.of(g))
         cl.direction = d.direction
+        cl.memo = memo
         d.describeGroups(cl g)
         cl.run()
         def lay:LayeredLayout cl.rootLayout

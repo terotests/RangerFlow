@@ -57,6 +57,7 @@
 ; ============================================================================
 
 Import "../core/GraphModel.rgr"
+Import "LayoutMemo.rgr"
 
 class LayeredLayout {
     def graph:FlowGraph (new FlowGraph)
@@ -87,7 +88,18 @@ class LayeredLayout {
     ; Fresh starts the search may make, from shuffled orders, while
     ; crossings are left and the budget lasts. Seeded, so the same chart is
     ; always the same picture.
-    def restarts:int 8
+    def restarts:int 32
+    ; …and what they may spend between them: `restartShare` times what the
+    ; first search cost, but never less than `restartFloor`. A small chart
+    ; gets all its restarts for next to nothing; a big one with crossings
+    ; it cannot lose stops after a few, rather than paying for all of them.
+    def restartShare:int 3
+    def restartFloor:int 40000
+    ; Orders already found, by the shape they were found for — see
+    ; `LayoutMemo`. Off unless the caller hands over a live one.
+    def memo:FlowLayoutMemo (new FlowLayoutMemo)
+    ; Whether this run's order came out of the memo.
+    def memoHit:boolean false
     def originX:double 0.0
     def originY:double 0.0
     ; The cross-axis room one routed edge takes in a layer it passes through.
@@ -895,9 +907,65 @@ class LayeredLayout {
             seedCrossings = -1
             finalCrossings = (this.countCrossings())
         } {
-            this.reduceCrossings()
+            memoHit = false
+            def sig:string ""
+            if memo.active {
+                sig = (this.shapeSignature())
+                def kept:[int] (memo.lookup(sig))
+                if ((array_length kept) == (this.vertexCount())) {
+                    this.restoreOrder(kept)
+                    seedCrossings = -1
+                    finalCrossings = (memo.crossingsOf(sig))
+                    memoHit = true
+                }
+            }
+            if (memoHit == false) {
+                this.reduceCrossings()
+                if memo.active {
+                    memo.remember(sig vOrder finalCrossings)
+                }
+            }
         }
         this.deriveNodeOrder()
+    }
+
+    ; What the order depends on and nothing else: the direction, each
+    ; vertex's layer and what it stands for, and which vertices are joined.
+    ; Sizes and labels are left out on purpose — a label edit keeps the
+    ; shape, and with it the order.
+    fn shapeSignature:string () {
+        def out:string direction
+        out = (out + "|" + (to_string (this.seedFlags())))
+        def v:int 0
+        while (v < (this.vertexCount())) {
+            def ni:int (itemAt vNode v)
+            out = (out + ";" + (to_string (itemAt vLayer v)) + ":")
+            if (ni >= 0) {
+                out = (out + (graph.nodeAt(ni)).id)
+            } {
+                out = (out + "~" + (to_string (itemAt vEdge v)))
+            }
+            def at:int (itemAt vOutHead v)
+            while (at >= 0) {
+                out = (out + ">" + (to_string (itemAt vOutTo at)))
+                at = (itemAt vOutNext at)
+            }
+            out = (out + "@" + (to_string (itemAt vOrder v)))
+            v = (v + 1)
+        }
+        return out
+    }
+
+    ; The switches that change what the search does with a shape.
+    fn seedFlags:int () {
+        def f:int 0
+        if unconnectedAside {
+            f = (f + 1)
+        }
+        if useDummies {
+            f = (f + 2)
+        }
+        return ((f * 1000) + sweeps)
     }
 
     ; The crossing reduction, judged. The barycentre sweeps run as they
@@ -928,6 +996,12 @@ class LayeredLayout {
         ; order mirrored. A restart replaces the result only when it is
         ; strictly better, so on a tie the written order wins.
         def tries:int (2 + restarts)
+        def fruitless:int 0
+        def firstWork:int orderWork
+        def allowance:int (firstWork * restartShare)
+        if (allowance < restartFloor) {
+            allowance = restartFloor
+        }
         def rng:int 7919
         def start:int 0
         while ((bestCount > 0) && (start < tries)) {
@@ -948,8 +1022,14 @@ class LayeredLayout {
                 if (again < bestCount) {
                     bestCount = again
                     best = (this.copyOrder())
+                    fruitless = 0
+                } {
+                    fruitless = (fruitless + 1)
                 }
                 start = (start + 1)
+                if ((orderWork - firstWork) > allowance) {
+                    start = tries
+                }
             }
         }
         this.restoreOrder(best)

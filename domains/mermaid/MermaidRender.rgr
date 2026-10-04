@@ -91,6 +91,12 @@ class MermaidRender {
 
     ; Text, and the look to draw it in, into a laid-out graph.
     sfn draw:MermaidDrawing (text:string style:FlowStyle) {
+        return (MermaidRender.drawWith(text style (new FlowLayoutMemo)))
+    }
+
+    ; The same, with a flowchart's layout orders kept in `memo` between
+    ; calls — see `LayoutMemo` and `MermaidSceneCache`.
+    sfn drawWith:MermaidDrawing (text:string style:FlowStyle memo:FlowLayoutMemo) {
         def out:MermaidDrawing (new MermaidDrawing())
         def d:MermaidDiagram (MermaidReader.parse(text))
         def kind:string d.diagramKind
@@ -331,7 +337,7 @@ class MermaidRender {
         def n:int (d.nodeCount())
         if (n == 0) { return out }
         if ((strlen kind) == 0) { out.kind = "flowchart" }
-        out.graph = (MermaidFlow.styled(d style))
+        out.graph = (MermaidFlow.styledWith(d style memo))
         out.ok = true
         return out
     }
@@ -361,7 +367,11 @@ class MermaidRender {
     }
 
     sfn sceneWrappedStyled:FlowScene (text:string style:FlowStyle maxWidth:double padding:double aspect:double) {
-        def drawing:MermaidDrawing (MermaidRender.draw(text style))
+        return (MermaidRender.sceneWrappedWith(text style maxWidth padding aspect (new FlowLayoutMemo)))
+    }
+
+    sfn sceneWrappedWith:FlowScene (text:string style:FlowStyle maxWidth:double padding:double aspect:double memo:FlowLayoutMemo) {
+        def drawing:MermaidDrawing (MermaidRender.drawWith(text style memo))
         if (! drawing.ok) {
             return (new FlowScene)
         }
@@ -393,5 +403,56 @@ class MermaidRender {
         def scale:double (maxWidth / natural.worldW)
         def h:double (natural.worldH * scale)
         return (v.buildForPage(maxWidth h 0.0))
+    }
+}
+
+; ----------------------------------------------------------------------------
+; MermaidSceneCache — a diagram that has not changed is not drawn again.
+; ----------------------------------------------------------------------------
+;
+; A slide deck, a Markdown preview, a page of diagrams: each redraws on
+; every edit of the page, and on most of them the diagram's own text did not
+; change at all. The scene drawn last time is the answer, so it is handed
+; back as it is — the layout, the routing and the scene are skipped, not
+; redone. A text that did change but kept its shape (a label edited) still
+; skips the crossing search through the shared `FlowLayoutMemo`.
+;
+; The scene is SHARED with the caller that got it first: a caller that
+; changes a scene it was given must not use the cache.
+class MermaidSceneEntry {
+    def key:string ""
+    def scene:FlowScene (new FlowScene)
+}
+
+class MermaidSceneCache {
+    def memo:FlowLayoutMemo (FlowLayoutMemo.create())
+    def capacity:int 64
+    def keys:[string:int]
+    def entries:[MermaidSceneEntry]
+    def hits:int 0
+    def misses:int 0
+
+    fn scene:FlowScene (text:string styleName:string maxWidth:double padding:double aspect:double) {
+        def key:string (styleName + "|" + (to_string maxWidth) + "|" + (to_string padding) + "|" + (to_string aspect) + "|" + text)
+        if (has keys key) {
+            def at:int (unwrap (get keys key))
+            def hit:MermaidSceneEntry (itemAt entries at)
+            hits = (hits + 1)
+            return hit.scene
+        }
+        misses = (misses + 1)
+        def style:FlowStyle (FlowStyle.named(styleName))
+        def sc:FlowScene (MermaidRender.sceneWrappedWith(text style maxWidth padding aspect memo))
+        if ((array_length entries) >= capacity) {
+            clear entries
+            def fresh:[string:int]
+            keys = fresh
+        }
+        def e (new MermaidSceneEntry)
+        e.key = key
+        e.scene = sc
+        set keys key (array_length entries)
+        push entries e
+        return sc
     }
 }

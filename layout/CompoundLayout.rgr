@@ -122,6 +122,8 @@ class CompoundLayout {
     ; Across the page the layer gap also holds the edge labels, which are
     ; written along the flow: the floor is whatever the longest needs.
     def labelRoomLR:boolean true
+    ; Handed to every layered layout this runs — see `LayoutMemo`.
+    def memo:FlowLayoutMemo (new FlowLayoutMemo)
 
     ; --- results ------------------------------------------------------------
     ; Where each group's frame goes, by group index. Width 0 for a group
@@ -279,6 +281,7 @@ class CompoundLayout {
     }
 
     fn configure:void (lay:LayeredLayout dir:string) {
+        lay.memo = memo
         lay.squareUp = squareUp
         lay.balance = balance
         lay.unconnectedAside = balance
