@@ -30,6 +30,12 @@
 ; Parallel runs through one gutter are spread onto lanes so they do not lie
 ; on each other.
 ;
+; A column ends only where the flow is a single link: one edge from the last
+; row to the next, and nothing else — no branch, no loop back — crossing that
+; line. Cut anywhere else, a loop's way back or a decision's other branch has
+; to cross the gutter and the boxes on the far side, and on a slide it is
+; lost between the columns. A flow with no such place is not wrapped.
+;
 ; What it does not do: a graph with groups (subgraphs, clusters) is left
 ; alone, because a group's box would have to be cut too.
 ; ============================================================================
@@ -140,6 +146,11 @@ class FlowWrap {
     def gW:double 0.0
     def gap:double 70.0
     def rowGap:double 50.0
+    ; cutOK[r]: a column may end after row r (see the header)
+    def cutOK:[boolean]
+    ; how many columns the last `split` filled: fewer than asked when the
+    ; places it may cut are few
+    def usedCols:int 1
 
     Constructor () {
         def a:[double]
@@ -150,6 +161,59 @@ class FlowWrap {
         colOfRow = c
         def d:[double]
         yOfRow = d
+        def ok:[boolean]
+        cutOK = ok
+    }
+
+    ; Where a column may end: after row r when the one edge crossing from
+    ; above r+1 to below r is a link from row r to row r+1.
+    fn findCuts:int (g:FlowGraph rowOf:[int]) {
+        clear cutOK
+        def crossing:[int]
+        def adjacent:[int]
+        def r:int 0
+        while (r < rows) {
+            push cutOK false
+            push crossing 0
+            push adjacent 0
+            r = (r + 1)
+        }
+        def e:int 0
+        while (e < (g.edgeCount())) {
+            def ed:FlowEdge (g.edgeAt(e))
+            def si:int (g.indexOfNode(ed.source))
+            def ti:int (g.indexOfNode(ed.target))
+            if ((si >= 0) && (ti >= 0)) {
+                def ra:int (itemAt rowOf si)
+                def rb:int (itemAt rowOf ti)
+                def lo:int ra
+                def hi:int rb
+                if (rb < ra) {
+                    lo = rb
+                    hi = ra
+                }
+                ; it crosses every line between rows lo..hi
+                def k:int lo
+                while (k < hi) {
+                    set crossing k ((itemAt crossing k) + 1)
+                    if ((rb == (ra + 1)) && (k == ra)) {
+                        set adjacent k ((itemAt adjacent k) + 1)
+                    }
+                    k = (k + 1)
+                }
+            }
+            e = (e + 1)
+        }
+        def count:int 0
+        def c:int 0
+        while (c < (rows - 1)) {
+            if (((itemAt crossing c) == 1) && ((itemAt adjacent c) == 1)) {
+                set cutOK c true
+                count = (count + 1)
+            }
+            c = (c + 1)
+        }
+        return count
     }
 
     fn measure:void (g:FlowGraph rowOf:[int]) {
@@ -180,29 +244,70 @@ class FlowWrap {
         gW = (x1 - x0)
     }
 
-    ; Rows into `cols` columns, each filled to an even share of the height.
-    ; Returns the tallest column.
+    ; Rows into at most `cols` columns, cut only where `cutOK` allows, with
+    ; the tallest column as short as those cuts can make it. The runs of rows
+    ; between two allowed cuts stay together; the least height that packs
+    ; them into `cols` columns in order is found by halving. Returns the
+    ; tallest column.
     fn split:double (cols:int) {
         clear colOfRow
         clear yOfRow
+        ; the runs: where each starts and how tall it is
+        def runStart:[boolean]
+        def runH:[double]
         def total:double 0.0
         def r:int 0
         while (r < rows) {
-            total = (total + (((itemAt rBot r) - (itemAt rTop r)) + rowGap))
+            def h0:double (((itemAt rBot r) - (itemAt rTop r)) + rowGap)
+            total = (total + h0)
+            def starts:boolean (r == 0)
+            if (r > 0) {
+                starts = (itemAt cutOK (r - 1))
+            }
+            push runStart starts
+            if starts {
+                push runH h0
+            } {
+                def last:int ((array_length runH) - 1)
+                set runH last ((itemAt runH last) + h0)
+            }
             r = (r + 1)
         }
-        def share:double (total / (to_double cols))
+        def lo:double 0.0
+        def ri:int 0
+        while (ri < (array_length runH)) {
+            if ((itemAt runH ri) > lo) {
+                lo = (itemAt runH ri)
+            }
+            ri = (ri + 1)
+        }
+        def hi:double total
+        def step:int 0
+        while ((step < 40) && ((hi - lo) > 0.5)) {
+            def mid:double ((lo + hi) * 0.5)
+            if ((FlowWrap.columnsFor(runH mid)) <= cols) {
+                hi = mid
+            } {
+                lo = mid
+            }
+            step = (step + 1)
+        }
         def col:int 0
         def used:double 0.0
         def tallest:double 0.0
+        def run:int -1
         def rr:int 0
         while (rr < rows) {
             def h:double (((itemAt rBot rr) - (itemAt rTop rr)) + rowGap)
-            if (((used + (h * 0.5)) > share) && ((col < (cols - 1)) && (used > 0.0))) {
-                col = (col + 1)
-                used = 0.0
+            if (itemAt runStart rr) {
+                run = (run + 1)
+                if (((used + (itemAt runH run)) > (hi + 0.001)) && (used > 0.0)) {
+                    col = (col + 1)
+                    used = 0.0
+                }
             }
             push colOfRow col
+            usedCols = (col + 1)
             push yOfRow used
             used = (used + h)
             if (used > tallest) {
@@ -213,11 +318,30 @@ class FlowWrap {
         return (tallest - rowGap)
     }
 
+    ; How many columns runs of these heights need, in order, none taller
+    ; than `most`.
+    sfn columnsFor:int (runH:[double] most:double) {
+        def n:int 1
+        def used:double 0.0
+        def i:int 0
+        while (i < (array_length runH)) {
+            def h:double (itemAt runH i)
+            if (((used + h) > (most + 0.001)) && (used > 0.0)) {
+                n = (n + 1)
+                used = h
+            } {
+                used = (used + h)
+            }
+            i = (i + 1)
+        }
+        return n
+    }
+
     ; How large the graph draws, per unit of the space's height, cut into
     ; `cols` columns and placed in a space of this aspect.
     fn fitFor:double (cols:int aspect:double) {
         def h:double (this.split(cols))
-        def w:double (((to_double cols) * gW) + ((to_double (cols - 1)) * gap))
+        def w:double (((to_double usedCols) * gW) + ((to_double (usedCols - 1)) * gap))
         if ((w <= 0.0) || (h <= 0.0)) {
             return 0.0
         }
@@ -271,6 +395,9 @@ class FlowWrap {
             rowGap = (u * 2.0)
         }
         this.measure(g rowOf)
+        if ((this.findCuts(g rowOf)) == 0) {
+            return false
+        }
         def best:int 1
         def bestFit:double (this.fitFor(1 aspect))
         def cols:int 2
@@ -288,7 +415,10 @@ class FlowWrap {
             return false
         }
         this.split(best)
-        columns = best
+        if (usedCols < 2) {
+            return false
+        }
+        columns = usedCols
         this.place(g rowOf u)
         return true
     }

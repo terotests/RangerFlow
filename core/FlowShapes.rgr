@@ -373,6 +373,32 @@ class FlowShapes {
         return (FlowShapes.outline(shape x y w h))
     }
 
+    ; A rectangle with rounded corners as a ring of points, clockwise from
+    ; the end of the top-left corner: what a dashed border is cut from.
+    sfn roundRectRing:[double] (x:double y:double w:double h:double radius:double) {
+        def r:double radius
+        if (r > (w * 0.5)) { r = (w * 0.5) }
+        if (r > (h * 0.5)) { r = (h * 0.5) }
+        if (r < 0.0) { r = 0.0 }
+        def pts:[double]
+        ; corner centres, and the angle each quarter starts at
+        def cxs:[double] ([] _:double (((x + w) - r) ((x + w) - r) (x + r) (x + r)))
+        def cys:[double] ([] _:double ((y + r) ((y + h) - r) ((y + h) - r) (y + r)))
+        def c:int 0
+        while (c < 4) {
+            def a0:double ((((to_double c) - 1.0) * 3.14159265358979) * 0.5)
+            def k:int 0
+            while (k <= 4) {
+                def a:double (a0 + (((to_double k) / 4.0) * (3.14159265358979 * 0.5)))
+                push pts ((itemAt cxs c) + (r * (cos a)))
+                push pts ((itemAt cys c) + (r * (sin a)))
+                k = (k + 1)
+            }
+            c = (c + 1)
+        }
+        return pts
+    }
+
     ; The outline, as x0 y0 x1 y1 … in the order a pen would draw it.
     sfn outline:[double] (shape:string x:double y:double w:double h:double) {
         def pts:[double]
