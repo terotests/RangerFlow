@@ -34,6 +34,7 @@
     "rangerflow:plantuml:parity": "npm run --silent rangerflow:plantuml:oracle || echo '  (no PlantUML: the oracle could not be built — nothing to compare against)'; npm run --silent rangerflow:plantuml:dump && node gallery/rangerflow/tools/plantuml-parity.mjs",
     "rangerflow:process": "npm run rangerflow:build && node ./gallery/rangerflow/bin/rangerflow_demo.js --process",
     "rangerflow:quality": "npm run rangerflow:build && node ./gallery/rangerflow/bin/rangerflow_demo.js --quality gallery/rangerflow/fixtures/*.mmd gallery/rangerflow/fixtures/mermaid/*.mmd",
+    "rangerflow:quality:test": "node dist/rgrc.js -es6 ./gallery/rangerflow/tests/FlowQualityTest.rgr -d=./gallery/rangerflow/bin -o=FlowQualityTest.js -nodecli && node ./gallery/rangerflow/bin/FlowQualityTest.js",
     "rangerflow:rivals": "npm run --silent rangerflow:parity:dump && node gallery/rangerflow/tools/rivals.mjs",
     "rangerflow:sdl": "bash gallery/rangerflow/platform/sdl/build.sh",
     "rangerflow:sdl:run": "bash gallery/rangerflow/platform/sdl/build.sh --run gallery/rangerflow/fixtures/ecommerce.sql",

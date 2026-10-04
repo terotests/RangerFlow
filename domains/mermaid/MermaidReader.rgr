@@ -937,23 +937,290 @@ class MermaidDiagram {
                         k = (k + 1)
                         continue
                     }
+                    ; Two boxes in different layers — one wholly past the
+                    ; other along the flow — never meet flank to flank.
+                    ; Judged by the angle alone, a child three places to the
+                    ; side was joined out of the parent's flank and into its
+                    ; OWN flank: an S that leaves and arrives far from where
+                    ; the eye looks for it. Such a pair is joined by an L —
+                    ; one corner — out of one box's flank and into the
+                    ; other's top or bottom, with the flank on whichever end
+                    ; has a clear run across to the other: the parent of a
+                    ; fan out, the child of a fan in. A box that stands in a
+                    ; row of others has its neighbours in the way of a run
+                    ; out of its flank. With neither clear, the line goes
+                    ; along the flow at both ends, through the gap between
+                    ; the rows.
+                    def gapX:double (b.x - (a.x + a.width))
+                    if (b.x < a.x) {
+                        gapX = (a.x - (b.x + b.width))
+                    }
+                    def gapY:double (b.y - (a.y + a.height))
+                    if (b.y < a.y) {
+                        gapY = (a.y - (b.y + b.height))
+                    }
+                    def layered:boolean false
+                    def acrossFlow:boolean false
                     if horiz {
-                        if alongX {
-                            MermaidDiagram.faceAcross(e dx)
-                        } {
-                            MermaidDiagram.faceDown(e dy)
-                        }
+                        layered = (gapX >= 24.0)
+                        acrossFlow = (alongX == false)
                     } {
-                        def alongY:boolean (ady >= (adx * 0.8))
-                        if alongY {
-                            MermaidDiagram.faceDown(e dy)
+                        layered = (gapY >= 24.0)
+                        acrossFlow = ((ady >= (adx * 0.8)) == false)
+                    }
+                    if (layered && acrossFlow) {
+                        MermaidDiagram.faceCorner(g e a b horiz)
+                    } {
+                        if horiz {
+                            if alongX {
+                                MermaidDiagram.faceAcross(e dx)
+                            } {
+                                MermaidDiagram.faceDown(e dy)
+                            }
                         } {
-                            MermaidDiagram.faceAcross(e dx)
+                            if (ady >= (adx * 0.8)) {
+                                MermaidDiagram.faceDown(e dy)
+                            } {
+                                MermaidDiagram.faceAcross(e dx)
+                            }
                         }
                     }
                 }
             }
             k = (k + 1)
+        }
+        MermaidDiagram.settleCorners(g horiz)
+    }
+
+    ; The L's at one box agree with each other. Lines that meet a box's
+    ; flank come in level with the box; lines that meet its top come down
+    ; through the gap above it. A line from far away coming down to the top
+    ; passes every line from nearer by on its way — and one of those that
+    ; dropped past the gap to reach the flank is crossed. So of the lines
+    ; reaching a box from one side, only the outermost may use the flank:
+    ; walking in from the farthest, the first that goes to the top sends
+    ; every nearer one to the top too. The same holds for lines leaving.
+    sfn settleCorners:void (g:FlowGraph horiz:boolean) {
+        def n:int 0
+        while (n < (g.nodeCount())) {
+            def nd:FlowNode (g.nodeAt(n))
+            def end:int 0
+            while (end < 2) {
+                def atSource:boolean (end == 1)
+                def side:int 0
+                while (side < 2) {
+                    MermaidDiagram.settleSide(g n nd atSource (side == 0) horiz)
+                    side = (side + 1)
+                }
+                end = (end + 1)
+            }
+            n = (n + 1)
+        }
+    }
+
+    ; One box, one end (lines leaving it or reaching it), one side across
+    ; the flow (the other boxes before it, or after it).
+    sfn settleSide:void (g:FlowGraph n:int nd:FlowNode atSource:boolean before:boolean horiz:boolean) {
+        def picked:[int]
+        def dist:[double]
+        def k:int 0
+        while (k < (g.edgeCount())) {
+            def e:FlowEdge (g.edgeAt(k))
+            def mine:int e.targetIndex
+            def otherIdx:int e.sourceIndex
+            if atSource {
+                mine = e.sourceIndex
+                otherIdx = e.targetIndex
+            }
+            if ((mine == n) && ((otherIdx >= 0) && (otherIdx != n))) {
+                def o:FlowNode (g.nodeAt(otherIdx))
+                def across:double ((o.centerX()) - (nd.centerX()))
+                def gap:double (o.y - (nd.y + nd.height))
+                if (o.y < nd.y) {
+                    gap = (nd.y - (o.y + o.height))
+                }
+                if horiz {
+                    across = ((o.centerY()) - (nd.centerY()))
+                    gap = (o.x - (nd.x + nd.width))
+                    if (o.x < nd.x) {
+                        gap = (nd.x - (o.x + o.width))
+                    }
+                }
+                def onSide:boolean (across > 0.0)
+                if before {
+                    onSide = (across < 0.0)
+                }
+                if (onSide && (gap >= 24.0)) {
+                    push picked k
+                    push dist (fabs across)
+                }
+            }
+            k = (k + 1)
+        }
+        def count:int (array_length picked)
+        if (count < 2) {
+            return
+        }
+        ; farthest first
+        def order:[int]
+        def i:int 0
+        while (i < count) {
+            push order i
+            def j:int ((array_length order) - 1)
+            while (j > 0) {
+                def prev:int (itemAt order (j - 1))
+                if ((itemAt dist prev) < (itemAt dist i)) {
+                    set_at order j prev
+                    set_at order (j - 1) i
+                    j = (j - 1)
+                } {
+                    j = 0
+                }
+            }
+            i = (i + 1)
+        }
+        def flankOk:boolean true
+        def w:int 0
+        while (w < count) {
+            def e2:FlowEdge (g.edgeAt((itemAt picked (itemAt order w))))
+            def handle:int e2.targetHandle
+            if atSource {
+                handle = e2.sourceHandle
+            }
+            ; the flank across the flow: left / right in a column, top /
+            ; bottom in a row
+            def flank:boolean ((handle == 1) || (handle == 3))
+            if horiz {
+                flank = ((handle == 0) || (handle == 2))
+            }
+            if (flank == false) {
+                flankOk = false
+            } {
+                if (flankOk == false) {
+                    def a:FlowNode (g.nodeAt(e2.sourceIndex))
+                    def b:FlowNode (g.nodeAt(e2.targetIndex))
+                    if horiz {
+                        def dx:double ((b.centerX()) - (a.centerX()))
+                        if atSource {
+                            def keepH:int e2.targetHandle
+                            MermaidDiagram.faceAcross(e2 dx)
+                            e2.targetHandle = keepH
+                        } {
+                            MermaidDiagram.arriveAcross(e2 dx)
+                        }
+                    } {
+                        def dy:double ((b.centerY()) - (a.centerY()))
+                        if atSource {
+                            def keepT:int e2.targetHandle
+                            MermaidDiagram.faceDown(e2 dy)
+                            e2.targetHandle = keepT
+                        } {
+                            MermaidDiagram.arriveDown(e2 dy)
+                        }
+                    }
+                }
+            }
+            w = (w + 1)
+        }
+    }
+
+    ; The L for two boxes in different layers that stand well apart across
+    ; the flow (see `faceEdges`). `horiz` is an LR / RL chart.
+    sfn faceCorner:void (g:FlowGraph e:FlowEdge a:FlowNode b:FlowNode horiz:boolean) {
+        def dx:double ((b.centerX()) - (a.centerX()))
+        def dy:double ((b.centerY()) - (a.centerY()))
+        if horiz {
+            ; out of a's top or bottom, along to b's middle, into b's flank
+            def outY:double (a.y + a.height)
+            if (dy < 0.0) { outY = a.y }
+            if (MermaidDiagram.clearRun(g a b (a.centerX()) outY (a.centerX()) (b.centerY()) (b.centerX()) (b.centerY()))) {
+                MermaidDiagram.faceDown(e dy)
+                MermaidDiagram.arriveAcross(e dx)
+                return
+            }
+            def inY:double b.y
+            if (dy < 0.0) { inY = (b.y + b.height) }
+            if (MermaidDiagram.clearRun(g a b (a.centerX()) (a.centerY()) (b.centerX()) (a.centerY()) (b.centerX()) inY)) {
+                MermaidDiagram.faceAcross(e dx)
+                MermaidDiagram.arriveDown(e dy)
+                return
+            }
+            MermaidDiagram.faceAcross(e dx)
+            return
+        }
+        ; out of a's flank, along to b's middle, down into b's top
+        def outX:double (a.x + a.width)
+        if (dx < 0.0) { outX = a.x }
+        if (MermaidDiagram.clearRun(g a b outX (a.centerY()) (b.centerX()) (a.centerY()) (b.centerX()) (b.centerY()))) {
+            MermaidDiagram.faceAcross(e dx)
+            MermaidDiagram.arriveDown(e dy)
+            return
+        }
+        ; …or out of a's bottom, down to b's middle, into b's flank
+        def inX:double b.x
+        if (dx < 0.0) { inX = (b.x + b.width) }
+        if (MermaidDiagram.clearRun(g a b (a.centerX()) (a.centerY()) (a.centerX()) (b.centerY()) inX (b.centerY()))) {
+            MermaidDiagram.faceDown(e dy)
+            MermaidDiagram.arriveAcross(e dx)
+            return
+        }
+        MermaidDiagram.faceDown(e dy)
+    }
+
+    ; Whether the two legs of an L — (x1,y1)→(x2,y2)→(x3,y3), each straight
+    ; along an axis — miss every box but the two it joins, by a margin.
+    sfn clearRun:boolean (g:FlowGraph a:FlowNode b:FlowNode x1:double y1:double x2:double y2:double x3:double y3:double) {
+        def pad:double 8.0
+        def i:int 0
+        while (i < (g.nodeCount())) {
+            def o:FlowNode (g.nodeAt(i))
+            if ((o.hidden == false) && ((o.id != a.id) && (o.id != b.id))) {
+                if (MermaidDiagram.legHits(o x1 y1 x2 y2 pad)) {
+                    return false
+                }
+                if (MermaidDiagram.legHits(o x2 y2 x3 y3 pad)) {
+                    return false
+                }
+            }
+            i = (i + 1)
+        }
+        return true
+    }
+
+    sfn legHits:boolean (o:FlowNode x1:double y1:double x2:double y2:double pad:double) {
+        def lx:double x1
+        def hx:double x2
+        if (x2 < x1) {
+            lx = x2
+            hx = x1
+        }
+        def ly:double y1
+        def hy:double y2
+        if (y2 < y1) {
+            ly = y2
+            hy = y1
+        }
+        if (hx < (o.x - pad)) { return false }
+        if (lx > ((o.x + o.width) + pad)) { return false }
+        if (hy < (o.y - pad)) { return false }
+        if (ly > ((o.y + o.height) + pad)) { return false }
+        return true
+    }
+
+    ; Only the arriving end: into the near flank, or into the top / bottom.
+    sfn arriveAcross:void (e:FlowEdge dx:double) {
+        if (dx >= 0.0) {
+            e.targetHandle = 3
+        } {
+            e.targetHandle = 1
+        }
+    }
+
+    sfn arriveDown:void (e:FlowEdge dy:double) {
+        if (dy >= 0.0) {
+            e.targetHandle = 0
+        } {
+            e.targetHandle = 2
         }
     }
 
@@ -2628,6 +2895,11 @@ class MermaidFlow {
     }
 
     sfn styled:FlowGraph (d:MermaidDiagram style:FlowStyle) {
+        return (MermaidFlow.styledWith(d style (new FlowLayoutMemo)))
+    }
+
+    ; The same, with orders found before kept in `memo` — see `LayoutMemo`.
+    sfn styledWith:FlowGraph (d:MermaidDiagram style:FlowStyle memo:FlowLayoutMemo) {
         def g:FlowGraph (d.buildStyled(style))
         ; The subgraphs are laid out from the inside out — each group on its
         ; own, then as one box in its parent's layout — so a frame is as
@@ -2640,6 +2912,7 @@ class MermaidFlow {
         ; its defaults, which are these numbers.
         def cl:CompoundLayout (CompoundLayout.of(g))
         cl.direction = d.direction
+        cl.memo = memo
         d.describeGroups(cl g)
         cl.run()
         def lay:LayeredLayout cl.rootLayout

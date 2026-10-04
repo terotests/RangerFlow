@@ -1,0 +1,1220 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ============================================================================
+; FlowQualityTest.rgr — hundreds of hard diagrams, judged on how they look
+; and how long they take.
+; ============================================================================
+;
+;   npm run rangerflow:quality:test
+;
+; The other suite asserts what a few known diagrams look like. This one
+; builds its diagrams on purpose, from families whose best drawing is known
+; in advance, and holds every member of the family to it:
+;
+;   chain        a straight line of boxes: no bend, no crossing, one column
+;   fan          one box feeding k (or k feeding one): children in the
+;                order written, the parent centred over them
+;   tree         a random tree: always drawable with no crossing, siblings
+;                in the order written
+;   planar       a layered graph with a crossing-free drawing, written down
+;                in a shuffled order: the engine has to find the drawing
+;   twisted      the same, written in the worst order there is
+;   longskip     a chain with edges skipping layers: nothing drawn through
+;                a box
+;   cycle        a chain with return edges
+;   groups       subgraphs with links between them
+;   components   unconnected pieces, kept in the order written
+;   dense        random DAGs with no crossing-free drawing: a budget on the
+;                crossings, and on the time
+;   scale        the same at 50…400 boxes: the time has to stay real-time
+;
+; Every case is generated from a seed, so a failure names a case that can be
+; drawn again: the suite prints its Mermaid text.
+;
+; The numbers a reader's eye takes from a drawing:
+;
+;   crossings    lines drawn through each other (EdgeOverlap.edgeCrossings)
+;   through      lines drawn through a box
+;   onEachOther  lines drawn on top of each other
+;   detours      an edge that bends although its two boxes face each other
+;                across one gap, so a straight line was there to be had
+;   endGap       how far a line's end is from its box — a line should start
+;                and finish ON the box, not short of it or inside it
+;   order        siblings / pieces not in the order the text wrote them
+;
+; And the one the user feels: milliseconds, per case and in total. The
+; layout runs on the main thread of a browser tab, so a case that takes
+; seconds is a frozen page, not a slow test.
+; ============================================================================
+
+Import "../layout/EdgeLanes.rgr"
+Import "../layout/RouteQuality.rgr"
+Import "../layout/LayeredLayout.rgr"
+Import "../domains/mermaid/MermaidRender.rgr"
+
+class QChecker {
+    def passed:int 0
+    def failed:int 0
+    def failures:[string]
+
+    fn ok:void (name:string cond:boolean) {
+        if cond {
+            passed = (passed + 1)
+        } {
+            failed = (failed + 1)
+            push failures name
+            print ("  FAIL " + name)
+        }
+    }
+}
+
+; Park–Miller: small enough that the product never leaves a double's exact
+; integers, so every target draws the same cases.
+class QRand {
+    def s:int 1
+
+    sfn seeded:QRand (seed:int) {
+        def r (new QRand)
+        r.s = ((seed % 2147483646) + 1)
+        return r
+    }
+
+    fn next:int (n:int) {
+        s = ((s * 16807) % 2147483647)
+        if (n <= 0) {
+            return 0
+        }
+        return (s % n)
+    }
+
+    fn shuffle:void (arr:[string]) {
+        def i:int ((array_length arr) - 1)
+        while (i > 0) {
+            def j:int (this.next((i + 1)))
+            def t:string (itemAt arr i)
+            set_at arr i (itemAt arr j)
+            set_at arr j t
+            i = (i - 1)
+        }
+    }
+}
+
+; One generated diagram and what it is held to.
+class QCase {
+    def family:string ""
+    def name:string ""
+    def src:string ""
+    def vertical:boolean true
+    ; Lines drawn through each other that are allowed: 0 where the family
+    ; has a crossing-free drawing, -1 for "not judged here".
+    def maxCrossings:int 0
+    def maxDetours:int -1
+    def maxBends:int -1
+    ; Groups of node ids that must stand in this order across the flow.
+    def orders:[string]
+    ; Groups of node ids whose centres along the cross axis must agree
+    ; (a straight column / row).
+    def aligned:[string]
+    ; A parent and the children it should be centred over: "P C1 C2 …".
+    def centred:[string]
+    def nodes:int 0
+
+    sfn create:QCase (family:string name:string vertical:boolean) {
+        def c (new QCase)
+        c.family = family
+        c.name = name
+        c.vertical = vertical
+        return c
+    }
+
+    fn header:string () {
+        if vertical {
+            return "flowchart TD\n"
+        }
+        return "flowchart LR\n"
+    }
+
+    fn link:void (a:string b:string) {
+        src = (src + "    " + a + " --> " + b + "\n")
+    }
+}
+
+; What one drawing measured.
+class QMeasure {
+    def ok:boolean false
+    def crossings:int 0
+    def through:int 0
+    def onEachOther:int 0
+    def detours:int 0
+    def bends:int 0
+    def endGap:double 0.0
+    def orderMisses:int 0
+    def alignMisses:int 0
+    def centreMisses:int 0
+    def ms:double 0.0
+    ; which edges detoured, for the report
+    def notes:string ""
+}
+
+; Totals per family, for the table at the end.
+class QFamily {
+    def name:string ""
+    def cases:int 0
+    def nodes:int 0
+    def crossings:int 0
+    def perfect:int 0
+    def through:int 0
+    def onEachOther:int 0
+    def detours:int 0
+    def bends:int 0
+    def orderMisses:int 0
+    def endGap:double 0.0
+    def ms:double 0.0
+    def worstMs:double 0.0
+    def worstName:string ""
+}
+
+class FlowQualityTest {
+    def c:QChecker (new QChecker)
+    def style:FlowStyle (FlowStyle.named("default"))
+    def families:[QFamily]
+    def verbose:boolean false
+    def totalMs:double 0.0
+
+    sfn main:void () {
+        def t (new FlowQualityTest)
+        def i:int 0
+        while (i < (shell_arg_cnt)) {
+            if ((shell_arg i) == "--verbose") {
+                t.verbose = true
+            }
+            i = (i + 1)
+        }
+        t.run()
+    }
+
+    fn run:void () {
+        print "== RangerFlow: generated diagrams, quality and time =="
+        this.chains()
+        this.fans()
+        this.trees()
+        this.planar()
+        this.twisted()
+        this.longSkips()
+        this.cycles()
+        this.groups()
+        this.components()
+        this.dense()
+        this.scale()
+        this.determinism()
+        this.memoization()
+        this.layoutBudget()
+        this.table()
+        print ""
+        print ("passed " + (to_string c.passed) + ", failed " + (to_string c.failed))
+        if (c.failed > 0) {
+            set_exit_code 1
+        }
+    }
+
+    ; ----------------------------------------------------------- measuring --
+
+    fn familyOf:QFamily (name:string) {
+        def i:int 0
+        while (i < (array_length families)) {
+            def f:QFamily (itemAt families i)
+            if (f.name == name) {
+                return f
+            }
+            i = (i + 1)
+        }
+        def nf (new QFamily)
+        nf.name = name
+        push families nf
+        return nf
+    }
+
+    sfn crossOf:double (n:FlowNode vertical:boolean) {
+        if vertical {
+            return (n.x + (n.width * 0.5))
+        }
+        return (n.y + (n.height * 0.5))
+    }
+
+    ; How far a point is from the outline of a rectangle, inside or out.
+    sfn offOutline:double (px:double py:double n:FlowNode) {
+        def x2:double (n.x + n.width)
+        def y2:double (n.y + n.height)
+        def inside:boolean false
+        if (px >= n.x) {
+            if (px <= x2) {
+                if (py >= n.y) {
+                    if (py <= y2) {
+                        inside = true
+                    }
+                }
+            }
+        }
+        if inside {
+            def d:double (px - n.x)
+            if ((x2 - px) < d) { d = (x2 - px) }
+            if ((py - n.y) < d) { d = (py - n.y) }
+            if ((y2 - py) < d) { d = (y2 - py) }
+            return d
+        }
+        def dx:double 0.0
+        if (px < n.x) { dx = (n.x - px) }
+        if (px > x2) { dx = (px - x2) }
+        def dy:double 0.0
+        if (py < n.y) { dy = (n.y - py) }
+        if (py > y2) { dy = (py - y2) }
+        return (sqrt ((dx * dx) + (dy * dy)))
+    }
+
+    ; Two boxes facing each other across one gap, with room for a straight
+    ; line between them and nothing standing in that room. The room is
+    ; where a line may meet each box: the middle 70 % of its side, which is
+    ; what the router lets a socket use — two boxes that overlap only at
+    ; their corners have no straight line between them to be had.
+    sfn straightPossible:boolean (g:FlowGraph a:FlowNode b:FlowNode vertical:boolean) {
+        def lo:double 0.0
+        def hi:double 0.0
+        if vertical {
+            lo = ((a.centerX()) - (a.width * 0.35))
+            if (((b.centerX()) - (b.width * 0.35)) > lo) { lo = ((b.centerX()) - (b.width * 0.35)) }
+            hi = ((a.centerX()) + (a.width * 0.35))
+            if (((b.centerX()) + (b.width * 0.35)) < hi) { hi = ((b.centerX()) + (b.width * 0.35)) }
+        } {
+            lo = ((a.centerY()) - (a.height * 0.35))
+            if (((b.centerY()) - (b.height * 0.35)) > lo) { lo = ((b.centerY()) - (b.height * 0.35)) }
+            hi = ((a.centerY()) + (a.height * 0.35))
+            if (((b.centerY()) + (b.height * 0.35)) < hi) { hi = ((b.centerY()) + (b.height * 0.35)) }
+        }
+        if ((hi - lo) < 16.0) {
+            return false
+        }
+        ; the band between them along the flow
+        def from:double 0.0
+        def to:double 0.0
+        if vertical {
+            from = (a.y + a.height)
+            to = b.y
+            if (b.y < a.y) {
+                from = (b.y + b.height)
+                to = a.y
+            }
+        } {
+            from = (a.x + a.width)
+            to = b.x
+            if (b.x < a.x) {
+                from = (b.x + b.width)
+                to = a.x
+            }
+        }
+        if (to <= from) {
+            return false
+        }
+        def i:int 0
+        while (i < (g.nodeCount())) {
+            def o:FlowNode (g.nodeAt(i))
+            if (o.hidden == false) {
+                if (o.id != a.id) {
+                    if (o.id != b.id) {
+                        def oLo:double o.x
+                        def oHi:double (o.x + o.width)
+                        def oFrom:double o.y
+                        def oTo:double (o.y + o.height)
+                        if (vertical == false) {
+                            oLo = o.y
+                            oHi = (o.y + o.height)
+                            oFrom = o.x
+                            oTo = (o.x + o.width)
+                        }
+                        if (oHi > lo) {
+                            if (oLo < hi) {
+                                if (oTo > from) {
+                                    if (oFrom < to) {
+                                        return false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i = (i + 1)
+        }
+        return true
+    }
+
+    fn idsAlongCross:boolean (g:FlowGraph ids:string vertical:boolean) {
+        def parts:[string] (strsplit ids " ")
+        def last:double -1000000.0
+        def i:int 0
+        while (i < (array_length parts)) {
+            def id:string (itemAt parts i)
+            if ((strlen id) > 0) {
+                if ((g.hasNode(id)) == false) {
+                    return false
+                }
+                def at:double (FlowQualityTest.crossOf((g.nodeById(id)) vertical))
+                if (at <= last) {
+                    return false
+                }
+                last = at
+            }
+            i = (i + 1)
+        }
+        return true
+    }
+
+    fn idsAligned:boolean (g:FlowGraph ids:string vertical:boolean) {
+        def parts:[string] (strsplit ids " ")
+        def first:double 0.0
+        def have:boolean false
+        def i:int 0
+        while (i < (array_length parts)) {
+            def id:string (itemAt parts i)
+            if ((strlen id) > 0) {
+                if ((g.hasNode(id)) == false) {
+                    return false
+                }
+                def at:double (FlowQualityTest.crossOf((g.nodeById(id)) vertical))
+                if have {
+                    if ((fabs (at - first)) > 1.0) {
+                        return false
+                    }
+                } {
+                    first = at
+                    have = true
+                }
+            }
+            i = (i + 1)
+        }
+        return true
+    }
+
+    ; The parent within a quarter of a box of the middle of its children.
+    fn idsCentred:boolean (g:FlowGraph ids:string vertical:boolean) {
+        def parts:[string] (strsplit ids " ")
+        def p:FlowNode (g.nodeById((itemAt parts 0)))
+        def lo:double 1000000.0
+        def hi:double -1000000.0
+        def i:int 1
+        while (i < (array_length parts)) {
+            def at:double (FlowQualityTest.crossOf((g.nodeById((itemAt parts i))) vertical))
+            if (at < lo) { lo = at }
+            if (at > hi) { hi = at }
+            i = (i + 1)
+        }
+        def mid:double ((lo + hi) * 0.5)
+        def tol:double (p.width * 0.25)
+        if (vertical == false) {
+            tol = (p.height * 0.25)
+        }
+        return ((fabs ((FlowQualityTest.crossOf(p vertical)) - mid)) <= tol)
+    }
+
+    fn measure:QMeasure (k:QCase) {
+        def m (new QMeasure)
+        def t0:double (wall_clock_ms)
+        def dr:MermaidDrawing (MermaidRender.draw(k.src style))
+        def t1:double (wall_clock_ms)
+        m.ms = (t1 - t0)
+        if (dr.ok == false) {
+            return m
+        }
+        m.ok = true
+        def g:FlowGraph dr.graph
+        m.crossings = (EdgeOverlap.edgeCrossings(g))
+        m.through = (EdgeOverlap.nodeCrossings(g))
+        m.onEachOther = (EdgeOverlap.pairs(g 2.0))
+        m.bends = (RouteQuality.totalBends(g))
+        def i:int 0
+        while (i < (g.edgeCount())) {
+            def e:FlowEdge (g.edgeAt(i))
+            if (e.hidden == false) {
+                if (e.sourceIndex >= 0) {
+                    if (e.targetIndex >= 0) {
+                        if (e.source != e.target) {
+                            def a:FlowNode (g.nodeAt(e.sourceIndex))
+                            def b:FlowNode (g.nodeAt(e.targetIndex))
+                            if (FlowQualityTest.straightPossible(g a b k.vertical)) {
+                                if ((RouteQuality.bends(g e)) > 0) {
+                                    m.detours = (m.detours + 1)
+                                    m.notes = (m.notes + " detour:" + e.source + "->" + e.target)
+                                }
+                            }
+                            def p:EdgePath (EdgeRouter.route(g e))
+                            p.flatten(2)
+                            def n:int (p.pointCount())
+                            if (n > 1) {
+                                if (a.shape == "rect") {
+                                    def ga:double (FlowQualityTest.offOutline((p.px(0)) (p.py(0)) a))
+                                    if (ga > m.endGap) { m.endGap = ga }
+                                }
+                                if (b.shape == "rect") {
+                                    def gb:double (FlowQualityTest.offOutline((p.px((n - 1))) (p.py((n - 1))) b))
+                                    if (gb > m.endGap) { m.endGap = gb }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i = (i + 1)
+        }
+        def o:int 0
+        while (o < (array_length k.orders)) {
+            if ((this.idsAlongCross(g (itemAt k.orders o) k.vertical)) == false) {
+                m.orderMisses = (m.orderMisses + 1)
+            }
+            o = (o + 1)
+        }
+        def a2:int 0
+        while (a2 < (array_length k.aligned)) {
+            if ((this.idsAligned(g (itemAt k.aligned a2) k.vertical)) == false) {
+                m.alignMisses = (m.alignMisses + 1)
+            }
+            a2 = (a2 + 1)
+        }
+        def c2:int 0
+        while (c2 < (array_length k.centred)) {
+            if ((this.idsCentred(g (itemAt k.centred c2) k.vertical)) == false) {
+                m.centreMisses = (m.centreMisses + 1)
+            }
+            c2 = (c2 + 1)
+        }
+        return m
+    }
+
+    ; Draw a case, record it, and hold it to what its family promises.
+    fn judge:QMeasure (k:QCase) {
+        def m:QMeasure (this.measure(k))
+        totalMs = (totalMs + m.ms)
+        def f:QFamily (this.familyOf(k.family))
+        f.cases = (f.cases + 1)
+        f.nodes = (f.nodes + k.nodes)
+        f.crossings = (f.crossings + m.crossings)
+        if (m.crossings == 0) {
+            f.perfect = (f.perfect + 1)
+        }
+        f.through = (f.through + m.through)
+        f.onEachOther = (f.onEachOther + m.onEachOther)
+        f.detours = (f.detours + m.detours)
+        f.bends = (f.bends + m.bends)
+        f.orderMisses = (f.orderMisses + m.orderMisses + m.alignMisses + m.centreMisses)
+        if (m.endGap > f.endGap) {
+            f.endGap = m.endGap
+        }
+        f.ms = (f.ms + m.ms)
+        if (m.ms > f.worstMs) {
+            f.worstMs = m.ms
+            f.worstName = k.name
+        }
+        def bad:boolean false
+        def tag:string (k.family + "/" + k.name)
+        if (m.ok == false) {
+            c.ok((tag + ": drawn") false)
+            return m
+        }
+        if (k.maxCrossings >= 0) {
+            if (m.crossings > k.maxCrossings) {
+                bad = true
+            }
+            c.ok((tag + ": crossings " + (to_string m.crossings) + " <= " + (to_string k.maxCrossings)) (m.crossings <= k.maxCrossings))
+        }
+        if (m.through > 0) { bad = true }
+        c.ok((tag + ": no line through a box (" + (to_string m.through) + ")") (m.through == 0))
+        if (m.endGap > 2.0) { bad = true }
+        c.ok((tag + ": lines end on their boxes (off by " + (to_string m.endGap) + ")") (m.endGap <= 2.0))
+        if (k.maxDetours >= 0) {
+            if (m.detours > k.maxDetours) { bad = true }
+            c.ok((tag + ": detours " + (to_string m.detours) + " <= " + (to_string k.maxDetours)) (m.detours <= k.maxDetours))
+        }
+        if (k.maxBends >= 0) {
+            if (m.bends > k.maxBends) { bad = true }
+            c.ok((tag + ": bends " + (to_string m.bends) + " <= " + (to_string k.maxBends)) (m.bends <= k.maxBends))
+        }
+        if ((array_length k.orders) > 0) {
+            if (m.orderMisses > 0) { bad = true }
+            c.ok((tag + ": in the order written (" + (to_string m.orderMisses) + " out)") (m.orderMisses == 0))
+        }
+        if ((array_length k.aligned) > 0) {
+            if (m.alignMisses > 0) { bad = true }
+            c.ok((tag + ": in one line (" + (to_string m.alignMisses) + " out)") (m.alignMisses == 0))
+        }
+        if ((array_length k.centred) > 0) {
+            if (m.centreMisses > 0) { bad = true }
+            c.ok((tag + ": centred over its children (" + (to_string m.centreMisses) + " out)") (m.centreMisses == 0))
+        }
+        ; a time limit that grows with the size: a few ms a box is what a
+        ; drag at 60 frames a second can afford for the diagrams people
+        ; write, and a frozen tab is what it is there to prevent
+        def budget:double (100.0 + ((to_double k.nodes) * 3.0))
+        if (m.ms > budget) { bad = true }
+        c.ok((tag + ": drawn in " + (to_string (to_int m.ms)) + " ms <= " + (to_string (to_int budget))) (m.ms <= budget))
+        if (bad || verbose) {
+            print ("  ---- " + tag + "  crossings=" + (to_string m.crossings) + " through=" + (to_string m.through) + " onEachOther=" + (to_string m.onEachOther) + " detours=" + (to_string m.detours) + " bends=" + (to_string m.bends) + " ms=" + (to_string (to_int m.ms)) + m.notes)
+            if (bad || verbose) {
+                print k.src
+            }
+        }
+        return m
+    }
+
+    sfn id:string (prefix:string i:int) {
+        return (prefix + (to_string i))
+    }
+
+    sfn dirName:string (vertical:boolean) {
+        if vertical {
+            return "TD"
+        }
+        return "LR"
+    }
+
+    ; ------------------------------------------------------------- families --
+
+    ; A straight line of boxes is drawn straight.
+    fn chains:void () {
+        def n:int 2
+        while (n <= 12) {
+            def v:int 0
+            while (v < 2) {
+                def vertical:boolean (v == 0)
+                def k:QCase (QCase.create("chain" ((to_string n) + (FlowQualityTest.dirName(vertical))) vertical))
+                k.src = (k.header())
+                def col:string "N0"
+                def i:int 1
+                while (i < n) {
+                    k.link((FlowQualityTest.id("N" (i - 1))) (FlowQualityTest.id("N" i)))
+                    col = (col + " " + (FlowQualityTest.id("N" i)))
+                    i = (i + 1)
+                }
+                k.nodes = n
+                k.maxBends = 0
+                k.maxDetours = 0
+                push k.aligned col
+                this.judge(k)
+                v = (v + 1)
+            }
+            n = (n + 1)
+        }
+    }
+
+    ; One box feeding k, and k feeding one: the children in the order the
+    ; text wrote them, the parent centred over them, nothing crossing.
+    fn fans:void () {
+        def k2:int 2
+        while (k2 <= 8) {
+            def v:int 0
+            while (v < 4) {
+                def vertical:boolean ((v % 2) == 0)
+                def inward:boolean (v >= 2)
+                def what:string "out"
+                if inward { what = "in" }
+                def k:QCase (QCase.create("fan" (what + (to_string k2) + (FlowQualityTest.dirName(vertical))) vertical))
+                k.src = (k.header())
+                def kids:string ""
+                def i:int 0
+                while (i < k2) {
+                    def kid:string (FlowQualityTest.id("C" i))
+                    if inward {
+                        k.link(kid "P")
+                    } {
+                        k.link("P" kid)
+                    }
+                    kids = (kids + " " + kid)
+                    i = (i + 1)
+                }
+                k.nodes = (k2 + 1)
+                push k.orders kids
+                push k.centred ("P" + kids)
+                this.judge(k)
+                v = (v + 1)
+            }
+            k2 = (k2 + 1)
+        }
+    }
+
+    ; A random tree. Every tree has a layered drawing with no crossing, and
+    ; in it each parent's children can stand in the order they were written.
+    fn trees:void () {
+        def seed:int 1
+        while (seed <= 60) {
+            def r:QRand (QRand.seeded((seed * 7919)))
+            def n:int (6 + (r.next(30)))
+            def vertical:boolean ((seed % 3) != 0)
+            def k:QCase (QCase.create("tree" ("s" + (to_string seed) + "n" + (to_string n)) vertical))
+            k.src = (k.header())
+            def parentOf:[int]
+            push parentOf -1
+            def i:int 1
+            while (i < n) {
+                ; mostly recent parents, so the tree is deep as well as wide
+                def back:int (1 + (r.next(4)))
+                if ((r.next(4)) == 0) {
+                    back = (1 + (r.next(i)))
+                }
+                def p:int (i - back)
+                if (p < 0) { p = 0 }
+                push parentOf p
+                k.link((FlowQualityTest.id("T" p)) (FlowQualityTest.id("T" i)))
+                i = (i + 1)
+            }
+            ; the children of each parent, in the order written
+            def q:int 0
+            while (q < n) {
+                def kids:string ""
+                def count:int 0
+                def j:int 1
+                while (j < n) {
+                    if ((itemAt parentOf j) == q) {
+                        kids = (kids + " " + (FlowQualityTest.id("T" j)))
+                        count = (count + 1)
+                    }
+                    j = (j + 1)
+                }
+                if (count > 1) {
+                    push k.orders kids
+                }
+                q = (q + 1)
+            }
+            k.nodes = n
+            this.judge(k)
+            seed = (seed + 1)
+        }
+    }
+
+    ; A layered graph built crossing-free — each pair of neighbouring layers
+    ; joined by a staircase that never crosses itself — and then written in
+    ; a shuffled order, so the first appearance of the boxes says nothing
+    ; about where they belong. A drawing with no crossing exists; the engine
+    ; has to find it.
+    fn planarCase:QCase (seed:int reverse:boolean) {
+        def r:QRand (QRand.seeded((seed * 104729)))
+        def layers:int (3 + (r.next(4)))
+        def vertical:boolean ((seed % 2) == 0)
+        def fam:string "planar"
+        if reverse { fam = "twisted" }
+        def k:QCase (QCase.create(fam ("s" + (to_string seed)) vertical))
+        def widths:[int]
+        def l:int 0
+        while (l < layers) {
+            push widths (2 + (r.next(4)))
+            k.nodes = (k.nodes + (itemAt widths l))
+            l = (l + 1)
+        }
+        def fromLayer:[int]
+        def fromIdx:[int]
+        def toIdx:[int]
+        l = 0
+        while (l < (layers - 1)) {
+            def wa:int (itemAt widths l)
+            def wb:int (itemAt widths (l + 1))
+            def i:int 0
+            def j:int 0
+            def going:boolean true
+            while going {
+                push fromLayer l
+                push fromIdx i
+                push toIdx j
+                if ((i == (wa - 1)) && (j == (wb - 1))) {
+                    going = false
+                } {
+                    def step:int (r.next(3))
+                    if (i == (wa - 1)) { step = 1 }
+                    if (j == (wb - 1)) { step = 0 }
+                    if (step == 0) {
+                        i = (i + 1)
+                    }
+                    if (step == 1) {
+                        j = (j + 1)
+                    }
+                    if (step == 2) {
+                        i = (i + 1)
+                        j = (j + 1)
+                    }
+                }
+            }
+            l = (l + 1)
+        }
+        ; reversed: every odd layer named right to left, so the order of
+        ; first appearance is the mirror of a crossing-free one on every
+        ; other layer
+        def lines:[string]
+        def li:int 0
+        while (li < (array_length fromLayer)) {
+            def la:int (itemAt fromLayer li)
+            def ia:int (itemAt fromIdx li)
+            def ib:int (itemAt toIdx li)
+            if reverse {
+                if ((la % 2) == 1) {
+                    ia = (((itemAt widths la) - 1) - ia)
+                } {
+                    ib = (((itemAt widths (la + 1)) - 1) - ib)
+                }
+            }
+            push lines ("L" + (to_string la) + "_" + (to_string ia) + " --> L" + (to_string (la + 1)) + "_" + (to_string ib))
+            li = (li + 1)
+        }
+        if (reverse == false) {
+            r.shuffle(lines)
+        }
+        k.src = (k.header())
+        def x:int 0
+        while (x < (array_length lines)) {
+            k.src = (k.src + "    " + (itemAt lines x) + "\n")
+            x = (x + 1)
+        }
+        return k
+    }
+
+    fn planar:void () {
+        def seed:int 1
+        while (seed <= 80) {
+            def k:QCase (this.planarCase(seed false))
+            this.judge(k)
+            seed = (seed + 1)
+        }
+    }
+
+    fn twisted:void () {
+        def seed:int 1
+        while (seed <= 30) {
+            def k:QCase (this.planarCase(seed true))
+            this.judge(k)
+            seed = (seed + 1)
+        }
+    }
+
+    ; A chain with edges that skip layers. Nothing is drawn through a box,
+    ; and the chain itself stays one straight column.
+    fn longSkips:void () {
+        def seed:int 1
+        while (seed <= 30) {
+            def r:QRand (QRand.seeded((seed * 31337)))
+            def n:int (5 + (r.next(8)))
+            def vertical:boolean ((seed % 2) == 1)
+            def k:QCase (QCase.create("longskip" ("s" + (to_string seed) + "n" + (to_string n)) vertical))
+            k.src = (k.header())
+            def i:int 1
+            while (i < n) {
+                k.link((FlowQualityTest.id("S" (i - 1))) (FlowQualityTest.id("S" i)))
+                i = (i + 1)
+            }
+            def skips:int (1 + (r.next(3)))
+            def s:int 0
+            while (s < skips) {
+                def from:int (r.next((n - 2)))
+                def to:int (from + 2 + (r.next((n - from) - 2)))
+                if (to >= n) { to = (n - 1) }
+                k.link((FlowQualityTest.id("S" from)) (FlowQualityTest.id("S" to)))
+                s = (s + 1)
+            }
+            k.nodes = n
+            ; skips off one chain nest as brackets: none of them need cross
+            k.maxCrossings = 0
+            this.judge(k)
+            seed = (seed + 1)
+        }
+    }
+
+    ; A chain with edges back up it — a loop, a retry, a state machine.
+    fn cycles:void () {
+        def seed:int 1
+        while (seed <= 30) {
+            def r:QRand (QRand.seeded((seed * 7121)))
+            def n:int (4 + (r.next(8)))
+            def vertical:boolean ((seed % 2) == 1)
+            def k:QCase (QCase.create("cycle" ("s" + (to_string seed) + "n" + (to_string n)) vertical))
+            k.src = (k.header())
+            def i:int 1
+            while (i < n) {
+                k.link((FlowQualityTest.id("C" (i - 1))) (FlowQualityTest.id("C" i)))
+                i = (i + 1)
+            }
+            def backs:int (1 + (r.next(2)))
+            def b:int 0
+            while (b < backs) {
+                def to:int (r.next((n - 1)))
+                def from:int (to + 1 + (r.next(((n - 1) - to))))
+                k.link((FlowQualityTest.id("C" from)) (FlowQualityTest.id("C" to)))
+                b = (b + 1)
+            }
+            k.nodes = n
+            k.maxCrossings = 0
+            this.judge(k)
+            seed = (seed + 1)
+        }
+    }
+
+    ; Subgraphs, each a little chain, linked to each other.
+    fn groups:void () {
+        def seed:int 1
+        while (seed <= 24) {
+            def r:QRand (QRand.seeded((seed * 4421)))
+            def gc:int (2 + (r.next(3)))
+            def vertical:boolean ((seed % 2) == 0)
+            def k:QCase (QCase.create("groups" ("s" + (to_string seed) + "g" + (to_string gc)) vertical))
+            k.src = (k.header())
+            def sizes:[int]
+            def gi:int 0
+            while (gi < gc) {
+                def size:int (2 + (r.next(3)))
+                push sizes size
+                k.src = (k.src + "    subgraph G" + (to_string gi) + "\n")
+                def j:int 1
+                while (j < size) {
+                    k.src = (k.src + "        G" + (to_string gi) + "_" + (to_string (j - 1)) + " --> G" + (to_string gi) + "_" + (to_string j) + "\n")
+                    j = (j + 1)
+                }
+                k.src = (k.src + "    end\n")
+                k.nodes = (k.nodes + size)
+                gi = (gi + 1)
+            }
+            gi = 1
+            while (gi < gc) {
+                def from:int (r.next(gi))
+                def fi:int ((itemAt sizes from) - 1)
+                k.link(("G" + (to_string from) + "_" + (to_string fi)) ("G" + (to_string gi) + "_0"))
+                gi = (gi + 1)
+            }
+            k.maxCrossings = -1
+            this.judge(k)
+            seed = (seed + 1)
+        }
+    }
+
+    ; Pieces with no line between them stand in the order they were written.
+    fn components:void () {
+        def n:int 2
+        while (n <= 7) {
+            def v:int 0
+            while (v < 2) {
+                def vertical:boolean (v == 0)
+                def k:QCase (QCase.create("components" ((to_string n) + (FlowQualityTest.dirName(vertical))) vertical))
+                k.src = (k.header())
+                def heads:string ""
+                def i:int 0
+                while (i < n) {
+                    k.link((FlowQualityTest.id("A" i)) (FlowQualityTest.id("B" i)))
+                    heads = (heads + " " + (FlowQualityTest.id("A" i)))
+                    i = (i + 1)
+                }
+                k.nodes = (n * 2)
+                push k.orders heads
+                k.maxBends = 0
+                this.judge(k)
+                v = (v + 1)
+            }
+            n = (n + 1)
+        }
+    }
+
+    ; Random DAGs, most of which have no crossing-free drawing. What is
+    ; held here is that nothing goes through a box, the time, and — in the
+    ; table — the crossings, so a change that makes them worse shows.
+    fn denseCase:QCase (family:string seed:int n:int) {
+        def r:QRand (QRand.seeded((seed * 6007)))
+        def vertical:boolean ((seed % 2) == 1)
+        def k:QCase (QCase.create(family ("s" + (to_string seed) + "n" + (to_string n)) vertical))
+        k.src = (k.header())
+        def i:int 1
+        while (i < n) {
+            def parents:int (1 + (r.next(2)))
+            def p:int 0
+            while (p < parents) {
+                def window:int 6
+                if (window > i) { window = i }
+                def from:int (i - 1 - (r.next(window)))
+                k.link((FlowQualityTest.id("D" from)) (FlowQualityTest.id("D" i)))
+                p = (p + 1)
+            }
+            i = (i + 1)
+        }
+        k.nodes = n
+        k.maxCrossings = -1
+        return k
+    }
+
+    fn dense:void () {
+        def seed:int 1
+        while (seed <= 40) {
+            def r:QRand (QRand.seeded(seed))
+            def k:QCase (this.denseCase("dense" seed (10 + (r.next(30)))))
+            this.judge(k)
+            seed = (seed + 1)
+        }
+    }
+
+    fn scale:void () {
+        def sizes:[int] ([] _:int (50 100 200 400))
+        def i:int 0
+        while (i < (array_length sizes)) {
+            def k:QCase (this.denseCase("scale" (i + 1) (itemAt sizes i)))
+            this.judge(k)
+            i = (i + 1)
+        }
+    }
+
+    ; The same text drawn twice is the same picture: a layout that moves
+    ; boxes between two identical drawings makes a live preview jump on
+    ; every keystroke.
+    fn determinism:void () {
+        def seed:int 1
+        while (seed <= 10) {
+            def k:QCase (this.denseCase("determinism" seed 25))
+            def a:MermaidDrawing (MermaidRender.draw(k.src style))
+            def b:MermaidDrawing (MermaidRender.draw(k.src style))
+            def same:boolean true
+            def i:int 0
+            while (i < (a.graph.nodeCount())) {
+                def na:FlowNode (a.graph.nodeAt(i))
+                def nb:FlowNode (b.graph.nodeAt(i))
+                if ((fabs (na.x - nb.x)) > 0.001) { same = false }
+                if ((fabs (na.y - nb.y)) > 0.001) { same = false }
+                i = (i + 1)
+            }
+            def j:int 0
+            while (j < (a.graph.edgeCount())) {
+                def ca:[double] (EdgeRouter.cornersFor(a.graph (a.graph.edgeAt(j))))
+                def cb:[double] (EdgeRouter.cornersFor(b.graph (b.graph.edgeAt(j))))
+                if ((array_length ca) != (array_length cb)) {
+                    same = false
+                } {
+                    def q:int 0
+                    while (q < (array_length ca)) {
+                        if ((fabs ((itemAt ca q) - (itemAt cb q))) > 0.001) { same = false }
+                        q = (q + 1)
+                    }
+                }
+                j = (j + 1)
+            }
+            c.ok(("determinism/s" + (to_string seed) + ": the same text is the same picture") same)
+            seed = (seed + 1)
+        }
+    }
+
+    ; An order once found is not searched for again. Drawn twice through
+    ; one memo, a chart is the same picture the second time and the second
+    ; layout takes its order from the memo; with a label made longer, the
+    ; shape is the same, so is the order, and the boxes keep their places
+    ; across the flow relative to each other. A scene cache hands back the
+    ; very scene for a text it has drawn.
+    fn memoization:void () {
+        def memo:FlowLayoutMemo (FlowLayoutMemo.create())
+        def firstMs:double 0.0
+        def againMs:double 0.0
+        def seed:int 1
+        while (seed <= 12) {
+            def k:QCase (this.planarCase((500 + seed) false))
+            if ((seed % 2) == 0) {
+                k = (this.denseCase("memo" seed 30))
+            }
+            def plain:MermaidDrawing (MermaidRender.draw(k.src style))
+            def hitsBefore:int memo.hits
+            def t0:double (wall_clock_ms)
+            def a:MermaidDrawing (MermaidRender.drawWith(k.src style memo))
+            def t1:double (wall_clock_ms)
+            def b:MermaidDrawing (MermaidRender.drawWith(k.src style memo))
+            def t2:double (wall_clock_ms)
+            firstMs = (firstMs + (t1 - t0))
+            againMs = (againMs + (t2 - t1))
+            c.ok(("memo/" + (to_string seed) + ": the second drawing takes the order it found") (memo.hits > hitsBefore))
+            c.ok(("memo/" + (to_string seed) + ": and is the same picture as the first") (FlowQualityTest.samePlaces(a.graph b.graph)))
+            c.ok(("memo/" + (to_string seed) + ": which is the picture drawn without a memo") (FlowQualityTest.samePlaces(plain.graph a.graph)))
+            ; a label grows: same shape, same order
+            def relabelled:string (k.src + "    " + (FlowQualityTest.firstId(k.src)) + "[\"a label a good deal longer than it was\"]\n")
+            def hitsMid:int memo.hits
+            def r:MermaidDrawing (MermaidRender.drawWith(relabelled style memo))
+            c.ok(("memo/" + (to_string seed) + ": a longer label keeps the shape, and the order") (memo.hits > hitsMid))
+            c.ok(("memo/" + (to_string seed) + ": every layer in the order it had") (FlowQualityTest.sameOrder(a.graph r.graph k.vertical)))
+            seed = (seed + 1)
+        }
+        print ("  memo: first drawings " + (to_string (to_int firstMs)) + " ms, the same again " + (to_string (to_int againMs)) + " ms")
+        c.ok("memo: drawing again through the memo is cheaper" (againMs < firstMs))
+        def cache (new MermaidSceneCache)
+        def k2:QCase (this.denseCase("memo" 99 40))
+        def t3:double (wall_clock_ms)
+        def s1:FlowScene (cache.scene(k2.src "default" 0.0 8.0 0.0))
+        def t4:double (wall_clock_ms)
+        def s2:FlowScene (cache.scene(k2.src "default" 0.0 8.0 0.0))
+        def t5:double (wall_clock_ms)
+        print ("  scene cache: drawn in " + (to_string (to_int (t4 - t3))) + " ms, handed back in " + (to_string (t5 - t4)) + " ms")
+        c.ok("scene cache: the same text is the same scene, not drawn again" ((cache.hits == 1) && (cache.misses == 1)))
+        c.ok("scene cache: and it has items" ((array_length s2.items) == (array_length s1.items)))
+        def s3:FlowScene (cache.scene(k2.src "default" 400.0 8.0 0.0))
+        c.ok("scene cache: another width is another scene" (cache.misses == 2))
+    }
+
+    ; The first node id a case's text names.
+    sfn firstId:string (src:string) {
+        def lines:[string] (strsplit src "\n")
+        def first:string (trim (itemAt lines 1))
+        def cut:int (indexOf first " ")
+        return (substring first 0 cut)
+    }
+
+    sfn samePlaces:boolean (a:FlowGraph b:FlowGraph) {
+        if ((a.nodeCount()) != (b.nodeCount())) {
+            return false
+        }
+        def i:int 0
+        while (i < (a.nodeCount())) {
+            def na:FlowNode (a.nodeAt(i))
+            def nb:FlowNode (b.nodeAt(i))
+            if ((fabs (na.x - nb.x)) > 0.001) { return false }
+            if ((fabs (na.y - nb.y)) > 0.001) { return false }
+            i = (i + 1)
+        }
+        return true
+    }
+
+    ; Every pair of boxes in one layer in the same order across the flow.
+    sfn sameOrder:boolean (a:FlowGraph b:FlowGraph vertical:boolean) {
+        def i:int 0
+        while (i < (a.nodeCount())) {
+            def j:int 0
+            while (j < (a.nodeCount())) {
+                if (i != j) {
+                    def ai:FlowNode (a.nodeAt(i))
+                    def aj:FlowNode (a.nodeAt(j))
+                    def bi:FlowNode (b.nodeById(ai.id))
+                    def bj:FlowNode (b.nodeById(aj.id))
+                    def sameLayer:boolean ((fabs (ai.y - aj.y)) < 1.0)
+                    if (vertical == false) {
+                        sameLayer = ((fabs (ai.x - aj.x)) < 1.0)
+                    }
+                    if sameLayer {
+                        def before:boolean ((FlowQualityTest.crossOf(ai vertical)) < (FlowQualityTest.crossOf(aj vertical)))
+                        def after:boolean ((FlowQualityTest.crossOf(bi vertical)) < (FlowQualityTest.crossOf(bj vertical)))
+                        if (before != after) {
+                            return false
+                        }
+                    }
+                }
+                j = (j + 1)
+            }
+            i = (i + 1)
+        }
+        return true
+    }
+
+    ; The ordering step on its own, on graphs far larger than anybody
+    ; writes by hand: it has to stop on its own budget rather than run until
+    ; the tab is killed.
+    fn layoutBudget:void () {
+        def sizes:[int] ([] _:int (200 800 2000))
+        def i:int 0
+        while (i < (array_length sizes)) {
+            def n:int (itemAt sizes i)
+            def r:QRand (QRand.seeded((n + 17)))
+            def g (new FlowGraph)
+            def v:int 0
+            while (v < n) {
+                g.addNode((FlowNode.create((FlowQualityTest.id("V" v)) "" 0.0 0.0)))
+                v = (v + 1)
+            }
+            def e:int 1
+            while (e < n) {
+                def parents:int (1 + (r.next(3)))
+                def p:int 0
+                while (p < parents) {
+                    def window:int 12
+                    if (window > e) { window = e }
+                    def from:int (e - 1 - (r.next(window)))
+                    g.addEdge((FlowEdge.create(("e" + (to_string e) + "_" + (to_string p)) (FlowQualityTest.id("V" from)) (FlowQualityTest.id("V" e)))))
+                    p = (p + 1)
+                }
+                e = (e + 1)
+            }
+            def lay:LayeredLayout (LayeredLayout.of(g))
+            lay.direction = "TB"
+            def t0:double (wall_clock_ms)
+            lay.run()
+            def t1:double (wall_clock_ms)
+            def ms:double (t1 - t0)
+            def budget:double (100.0 + ((to_double n) * 1.5))
+            print ("  layered layout, " + (to_string n) + " nodes: " + (to_string (to_int ms)) + " ms (budget " + (to_string (to_int budget)) + ")")
+            c.ok(("layout/" + (to_string n) + ": layered layout in " + (to_string (to_int ms)) + " ms <= " + (to_string (to_int budget))) (ms <= budget))
+            i = (i + 1)
+        }
+    }
+
+    ; --------------------------------------------------------------- table --
+
+    sfn pad:string (s:string w:int) {
+        def out:string s
+        while ((strlen out) < w) {
+            out = (out + " ")
+        }
+        return out
+    }
+
+    sfn padL:string (s:string w:int) {
+        def out:string s
+        while ((strlen out) < w) {
+            out = (" " + out)
+        }
+        return out
+    }
+
+    fn table:void () {
+        print ""
+        print "  family       cases  nodes  crossings  no-cross  through  onEach  detours  bends  order  endGap   ms total  worst ms"
+        def i:int 0
+        while (i < (array_length families)) {
+            def f:QFamily (itemAt families i)
+            def line:string ("  " + (FlowQualityTest.pad(f.name 12)))
+            line = (line + (FlowQualityTest.padL((to_string f.cases) 6)))
+            line = (line + (FlowQualityTest.padL((to_string f.nodes) 7)))
+            line = (line + (FlowQualityTest.padL((to_string f.crossings) 11)))
+            line = (line + (FlowQualityTest.padL(((to_string f.perfect) + "/" + (to_string f.cases)) 10)))
+            line = (line + (FlowQualityTest.padL((to_string f.through) 9)))
+            line = (line + (FlowQualityTest.padL((to_string f.onEachOther) 8)))
+            line = (line + (FlowQualityTest.padL((to_string f.detours) 9)))
+            line = (line + (FlowQualityTest.padL((to_string f.bends) 7)))
+            line = (line + (FlowQualityTest.padL((to_string f.orderMisses) 7)))
+            line = (line + (FlowQualityTest.padL((to_string ((to_double (to_int (f.endGap * 10.0))) / 10.0)) 8)))
+            line = (line + (FlowQualityTest.padL((to_string (to_int f.ms)) 11)))
+            line = (line + (FlowQualityTest.padL((to_string (to_int f.worstMs)) 10)) + "  " + f.worstName)
+            print line
+            i = (i + 1)
+        }
+        print ("  total " + (to_string (to_int totalMs)) + " ms")
+        this.ceilings()
+    }
+
+    ; What each family may add up to. The per-case checks hold what a case
+    ; must never do; these hold the totals at what the engine does now, a
+    ; little above, so a change that makes the pictures worse on the whole
+    ; — more crossings in the dense graphs, more corners, lines drawn on
+    ; each other — fails here even when no single case crosses a line.
+    ; Lower them when the engine gets better.
+    ;
+    ;              family       crossings  bends  detours  onEachOther
+    fn ceilings:void () {
+        this.ceiling("chain"        0      0     0     0)
+        this.ceiling("fan"          0    180     0     0)
+        this.ceiling("tree"         0    830     2     2)
+        this.ceiling("planar"       0   1450     4     2)
+        this.ceiling("twisted"      0    590     2     2)
+        this.ceiling("longskip"     0    175     2     8)
+        this.ceiling("cycle"        0     95     2    12)
+        this.ceiling("groups"       0     60     2     2)
+        this.ceiling("components"   0      0     0     0)
+        this.ceiling("dense"      165   2350    30    56)
+        this.ceiling("scale"      190   2000    30    70)
+        c.ok(("all " + (to_string (to_int totalMs)) + " ms of drawing within 4000 ms") (totalMs < 4000.0))
+    }
+
+    fn ceiling:void (name:string crossings:int bends:int detours:int onEach:int) {
+        def f:QFamily (this.familyOf(name))
+        c.ok((name + ": crossings in all " + (to_string f.crossings) + " <= " + (to_string crossings)) (f.crossings <= crossings))
+        c.ok((name + ": corners in all " + (to_string f.bends) + " <= " + (to_string bends)) (f.bends <= bends))
+        c.ok((name + ": detours in all " + (to_string f.detours) + " <= " + (to_string detours)) (f.detours <= detours))
+        c.ok((name + ": lines on each other in all " + (to_string f.onEachOther) + " <= " + (to_string onEach)) (f.onEachOther <= onEach))
+    }
+}

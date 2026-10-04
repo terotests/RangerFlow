@@ -1,0 +1,104 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ============================================================================
+; LayoutMemo.rgr — an order once found is not searched for again.
+; ============================================================================
+;
+; The expensive part of a layered layout is the crossing reduction: sweeps,
+; local moves, restarts. Its answer depends only on the SHAPE of the chart —
+; which boxes are in which layer, and which lines join them — not on what
+; the boxes say or how wide they are. A live preview redraws the chart on
+; every keystroke, and nearly every keystroke edits a label: the shape is
+; the one it was a moment ago, and so is the best order.
+;
+; So the order is kept, under a signature of that shape, and a layout that
+; meets the same shape again takes it instead of searching. Two things come
+; of it: the search is skipped (most of the time a redraw costs), and the
+; picture cannot jump between keystrokes because a label grew.
+;
+; A memo is owned by whoever draws repeatedly — an editor, a slide deck, a
+; page with many diagrams — and handed to the layout. One made with `new`
+; is off and remembers nothing, so a layout that was not given one behaves
+; exactly as before.
+; ============================================================================
+
+class FlowMemoEntry {
+    def order:[int]
+    def crossings:int 0
+}
+
+class FlowLayoutMemo {
+    def active:boolean false
+    ; How many shapes are kept. When full it starts again: the charts on one
+    ; page or in one editing session are a handful, and a cache that never
+    ; forgets is a leak in a tab that stays open all day.
+    def capacity:int 256
+    def index:[string:int]
+    def entries:[FlowMemoEntry]
+    def hits:int 0
+    def misses:int 0
+
+    sfn create:FlowLayoutMemo () {
+        def m (new FlowLayoutMemo)
+        m.active = true
+        return m
+    }
+
+    fn size:int () {
+        return (array_length entries)
+    }
+
+    fn clearAll:void () {
+        clear entries
+        def fresh:[string:int]
+        index = fresh
+    }
+
+    ; The order kept for this signature, or an empty list.
+    fn lookup:[int] (signature:string) {
+        def none:[int]
+        if (active == false) {
+            return none
+        }
+        if (has index signature) {
+            def at:int (unwrap (get index signature))
+            hits = (hits + 1)
+            def e:FlowMemoEntry (itemAt entries at)
+            return e.order
+        }
+        misses = (misses + 1)
+        return none
+    }
+
+    fn crossingsOf:int (signature:string) {
+        if (has index signature) {
+            def at:int (unwrap (get index signature))
+            def e:FlowMemoEntry (itemAt entries at)
+            return e.crossings
+        }
+        return -1
+    }
+
+    fn remember:void (signature:string order:[int] crossings:int) {
+        if (active == false) {
+            return
+        }
+        if ((array_length entries) >= capacity) {
+            this.clearAll()
+        }
+        def e (new FlowMemoEntry)
+        def i:int 0
+        while (i < (array_length order)) {
+            push e.order (itemAt order i)
+            i = (i + 1)
+        }
+        e.crossings = crossings
+        if (has index signature) {
+            def at:int (unwrap (get index signature))
+            set_at entries at e
+            return
+        }
+        set index signature (array_length entries)
+        push entries e
+    }
+}
