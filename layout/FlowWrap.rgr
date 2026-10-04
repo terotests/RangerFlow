@@ -146,6 +146,9 @@ class FlowWrap {
     def gW:double 0.0
     def gap:double 70.0
     def rowGap:double 50.0
+    ; how far a run between columns goes past the boxes: below the last box
+    ; of one column and above the first box of the next
+    def edgeOut:double 0.0
     ; cutOK[r]: a column may end after row r (see the header)
     def cutOK:[boolean]
     ; how many columns the last `split` filled: fewer than asked when the
@@ -341,6 +344,11 @@ class FlowWrap {
     ; `cols` columns and placed in a space of this aspect.
     fn fitFor:double (cols:int aspect:double) {
         def h:double (this.split(cols))
+        ; the runs between columns pass below and above the boxes, and the
+        ; drawing has to hold them too
+        if (usedCols > 1) {
+            h = (h + (edgeOut * 2.0))
+        }
         def w:double (((to_double usedCols) * gW) + ((to_double (usedCols - 1)) * gap))
         if ((w <= 0.0) || (h <= 0.0)) {
             return 0.0
@@ -395,6 +403,7 @@ class FlowWrap {
             rowGap = (u * 2.0)
         }
         this.measure(g rowOf)
+        edgeOut = (u * 0.8)
         if ((this.findCuts(g rowOf)) == 0) {
             return false
         }
@@ -441,7 +450,7 @@ class FlowWrap {
             c = (c + 1)
         }
         def lane:double (u * 0.45)
-        def out:double (u * 0.8)
+        def out:double edgeOut
         def e:int 0
         while (e < (g.edgeCount())) {
             def ed:FlowEdge (g.edgeAt(e))

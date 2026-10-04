@@ -1207,7 +1207,7 @@ class FlowView {
         def savedCtl:boolean showControls
         def savedPorts:boolean showPorts
         def savedCull:boolean culling
-        def r:FlowRect (graph.bounds())
+        def r:FlowRect (graph.drawnBounds())
         if (r.valid == false) {
             r.x = 0.0
             r.y = 0.0
@@ -1311,7 +1311,7 @@ class FlowView {
         def savedFloor:double labelFloorPx
         labelFloorPx = 0.0
         culling = false
-        def r:FlowRect (graph.bounds())
+        def r:FlowRect (graph.drawnBounds())
         if (r.valid == false) {
             r.x = 0.0
             r.y = 0.0
