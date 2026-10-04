@@ -172,6 +172,10 @@ class SceneItem {
     def d:string ""
     def closed:boolean false
     def dash:double 0.0
+    ; A node's body whose fill the diagram itself chose (FlowNode.ownFill).
+    ; Exporters draw the fill either way; a painter with a look of its own
+    ; (a slide's glass panels, a sketch) keeps this one colour.
+    def own:boolean false
 
     ; a tag the hit tester and the tests read: "node:<id>", "edge:<id>",
     ; "port:<id>", "chrome"

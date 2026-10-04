@@ -96,6 +96,9 @@ class D2Render {
         def v:FlowView (FlowView.of(drawing.graph))
         v.notation = drawing.notation
         style.applyToTheme(v.theme)
+        if (style.textFill > 1.0) {
+            v.fillText(style.textFill)
+        }
         v.showBackground = false
         v.theme.background = "#ffffff"
         def natural:FlowScene (v.buildForExport(padding))

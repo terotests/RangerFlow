@@ -26,6 +26,11 @@ class FlowWrapTest {
             + "  L --> M{Toimiiko vielä?}\n  M -->|Kyllä| N[LGTM]\n  M -->|Ei| I\n  N --> O[Ymmärrys 34 %]\n")
     }
 
+    ; twelve steps one after another, nothing branching or looping
+    sfn straight:string () {
+        return "flowchart TB\n  A --> B\n  B --> C\n  C --> D\n  D --> E\n  E --> F\n  F --> G\n  G --> H\n  H --> I\n  I --> J\n  J --> K\n  K --> L\n"
+    }
+
     sfn graphOf:FlowGraph (text:string) {
         def d:MermaidDrawing (MermaidRender.draw(text (FlowStyle.named("default"))))
         return d.graph
@@ -112,7 +117,7 @@ class FlowWrapTest {
         }
         this.ok((routed == (g.edgeCount())) "every edge is routed again")
         ; the scene still draws, with every node and edge tagged
-        def sc:FlowScene (MermaidRender.sceneWrapped((FlowWrapTest.chain()) "default" 0.0 20.0 1.5))
+        def sc:FlowScene (MermaidRender.sceneWrapped((FlowWrapTest.straight()) "default" 0.0 20.0 1.5))
         this.ok(((sc.worldW / sc.worldH) > 0.5) ("the wrapped scene is a block: " + (to_string sc.worldW) + "x" + (to_string sc.worldH)))
 
         ; a narrow space keeps one column
@@ -127,6 +132,37 @@ class FlowWrapTest {
         def g4:FlowGraph (FlowWrapTest.graphOf("flowchart TB\n  subgraph S\n  A --> B\n  end\n  B --> C\n  C --> D\n  D --> E\n  E --> F\n  F --> G\n  G --> H\n"))
         def grouped (new FlowWrap())
         this.ok((! (grouped.apply(g4 1.5 6))) "a flow with a group is not cut")
+
+        ; A column ends only at a single link: no loop's way back and no
+        ; branch crosses between columns, only the one link from the foot of
+        ; a column to the head of the next.
+        def g5:FlowGraph (FlowWrapTest.graphOf((FlowWrapTest.chain())))
+        def rowOf5:[int] (FlowWrap.rowsOf(g5))
+        def w5 (new FlowWrap())
+        def did5:boolean (w5.apply(g5 1.5 6))
+        def across:int 0
+        def back:int 0
+        def k:int 0
+        while (k < (g5.edgeCount())) {
+            def ed5:FlowEdge (g5.edgeAt(k))
+            def ca:int (itemAt w5.colOfRow (itemAt rowOf5 (g5.indexOfNode(ed5.source))))
+            def cb:int (itemAt w5.colOfRow (itemAt rowOf5 (g5.indexOfNode(ed5.target))))
+            if (ca != cb) {
+                across = (across + 1)
+            }
+            if (cb < ca) {
+                back = (back + 1)
+            }
+            k = (k + 1)
+        }
+        if did5 {
+            this.ok((across == (w5.columns - 1)) ("one link between columns: " + (to_string across) + " for " + (to_string w5.columns) + " columns"))
+        }
+        this.ok((back == 0) "no edge goes back to an earlier column")
+        ; a loop round the whole flow leaves no place to cut
+        def g6:FlowGraph (FlowWrapTest.graphOf("flowchart TB\n  A --> B\n  B --> C\n  C --> D\n  D --> E\n  E --> F\n  F --> G\n  G --> H\n  H --> A\n"))
+        def loop (new FlowWrap())
+        this.ok((! (loop.apply(g6 1.5 6))) "a flow that loops back to its start is not cut")
     }
 
     sfn main:void () {

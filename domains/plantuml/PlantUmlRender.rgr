@@ -131,6 +131,9 @@ class PlantUmlRender {
         def v:FlowView (FlowView.of(drawing.graph))
         v.notation = drawing.notation
         style.applyToTheme(v.theme)
+        if (style.textFill > 1.0) {
+            v.fillText(style.textFill)
+        }
         ; No canvas — the editor's paper and its grid of dots are part of an
         ; EDITOR. Both halves are needed: `showBackground` stops the grid, and
         ; the paper is a separate fill that follows the theme.

@@ -410,6 +410,12 @@ class FlowNode {
     ; -1 = the theme's. A per-node border weight exists because a stylesheet
     ; can ask for one; nothing in the core sets it.
     def borderWidth:double -1.0
+    ; A dashed border: the length of a dash, 0 for a solid one. Mermaid's
+    ; `style X stroke-dasharray: 5 5`, a sheet's `stroke-dasharray`.
+    def borderDash:double 0.0
+    ; The fill is the diagram's own (`classDef`, `style`, `fillcolor`), not
+    ; the look's. A painter that redraws the look keeps it.
+    def ownFill:boolean false
     ; What a stylesheet matches this node by, as a space-separated class list —
     ; the same thing a `class` attribute is. A domain writes the vocabulary it
     ; has (a Mermaid `classDef` name, a step kind), and `FlowStyle` adds what

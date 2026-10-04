@@ -48,6 +48,10 @@ Import "pkg:evg/EVGStyleSheet.rgr"
 
 class FlowStyle {
     def sheet:EVGStyleSheet (new EVGStyleSheet)
+    ; How much larger than the sheet's sizes the labels may be set where the
+    ; boxes have room for them (`FlowView.fillText`): 1 for a document, more
+    ; for a slide, which is read from across a room.
+    def textFill:double 1.0
     ; The theme name, or a space-separated list of them — `EVGStyleSheet`
     ; takes several at once so a look and a place can be scoped separately.
     def theme:string ""
@@ -288,6 +292,11 @@ class FlowStyle {
         }
         if (p == "stroke-width") {
             n.borderWidth = (FlowStyle.lengthOf(value -1.0))
+            written = (written + 1)
+            return
+        }
+        if (p == "stroke-dasharray") {
+            n.borderDash = (FlowStyle.dashOf(value))
             written = (written + 1)
             return
         }

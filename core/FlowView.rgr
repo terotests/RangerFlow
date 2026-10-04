@@ -105,6 +105,8 @@ class FlowView {
     ; the reader can zoom in. `buildForPage` and `buildForExport` turn the
     ; floor off for their duration; the interactive view keeps it.
     def labelFloorPx:double 5.0
+    ; How much `fillText` grew the labels (1: not at all)
+    def labelGrow:double 1.0
     ; --- the camera, or the camera baked in (S2) -------------------------------
     ;
     ; `false` is what this view always did: `sx`/`sy`/`sl` multiply the zoom and
@@ -611,6 +613,12 @@ class FlowView {
             def t:SceneItem (sc.text(line (cx - (lw * 0.5)) ly lw lay.size color))
             t.fontFamily = theme.fontFamily
             t.bold = bold
+            ; Centred, not merely placed: the box is this file's estimate of
+            ; the line, and a backend that measures with the real face (a
+            ; slide, the SVG) centres it on the same middle instead of
+            ; starting it where the estimate did. A wrapped label otherwise
+            ; comes out with its lines staggered.
+            t.align = "center"
             t.tag = tag
             i = (i + 1)
         }
@@ -1600,6 +1608,17 @@ class FlowView {
         def pad:double (this.hair(4.0))
         def bw:double (lay.width + (pad * 2.0))
         def bh:double (lay.height + pad)
+        ; A label set beside its line (a sequence message's, above it) was
+        ; placed for the size the model knew. Grown by `fillText`, it keeps
+        ; its near edge where it was and grows away from the line, instead of
+        ; growing over it.
+        if (labelGrow > 1.0) {
+            def keep:double (1.0 - (1.0 / labelGrow))
+            if (e.labelDY < 0.0) { my = (my - ((bh * keep) * 0.5)) }
+            if (e.labelDY > 0.0) { my = (my + ((bh * keep) * 0.5)) }
+            if (e.labelDX < 0.0) { mx = (mx - ((bw * keep) * 0.5)) }
+            if (e.labelDX > 0.0) { mx = (mx + ((bw * keep) * 0.5)) }
+        }
         def fill:string theme.edgeLabelFill
         if (this.isEditing(tag)) {
             fill = theme.editFill
@@ -1734,6 +1753,8 @@ class FlowView {
             def spunPoly:SceneItem (sc.polygon(spunRing fill))
             spunPoly.stroke = border
             spunPoly.strokeWidth = bw
+            spunPoly.dash = (this.sl(n.borderDash))
+            spunPoly.own = n.ownFill
             spunPoly.opacity = faded
             spunPoly.tag = tag
             this.paintShapeLabel(sc n x y w h tag)
@@ -1754,6 +1775,8 @@ class FlowView {
                 }
                 poly.stroke = border
                 poly.strokeWidth = bw
+                poly.dash = (this.sl(n.borderDash))
+                poly.own = n.ownFill
                 poly.opacity = faded
                 poly.tag = tag
                 this.paintOrnaments(sc n x y w h tag border bw fill)
@@ -1771,7 +1794,20 @@ class FlowView {
         body.radius = radius
         body.stroke = border
         body.strokeWidth = bw
+        body.own = n.ownFill
         body.tag = tag
+        if (n.borderDash > 0.0) {
+            ; A rectangle in the display list has a solid border or none, so
+            ; a dashed one is the box without its border and the border as a
+            ; dashed ring round it, cut into dashes once for every backend.
+            body.stroke = ""
+            def ring:[double] (FlowShapes.roundRectRing(x y w h radius))
+            push ring (itemAt ring 0)
+            push ring (itemAt ring 1)
+            def edge:SceneItem (sc.path(ring (this.screenPathD(ring)) border bw))
+            edge.dash = (this.sl(n.borderDash))
+            edge.tag = tag
+        }
         this.paintOrnaments(sc n x y w h tag border bw fill)
         if (n.shape == "predefined") {
             ; Two bars: "this step is a whole procedure of its own".
@@ -1995,41 +2031,9 @@ class FlowView {
         if ((this.drawn(size)) < labelFloorPx) {
             return
         }
-        ; How much of the box the shape actually leaves to write in, and where
-        ; in it the room is. A diamond has only its middle; a right triangle's
-        ; middle is on the hypotenuse, so its text sits lower and to the left.
-        def room:double (FlowShapes.labelRoom(n.shape w h))
-        def tall:double (h - (this.sl(10.0)))
-        if (n.shape == "diamond") {
-            tall = (h * 0.55)
-        }
-        if (n.shape == "triangle") {
-            tall = (h * 0.4)
-        }
-        if (n.shape == "triangledown") {
-            tall = (h * 0.4)
-        }
-        if (n.shape == "righttriangle") {
-            tall = (h * 0.4)
-        }
-        if (n.shape == "parallelogram") {
-            room = (w - ((FlowShapes.slantOf(w h)) * 2.0))
-        }
-        if (n.shape == "trapezoid") {
-            room = (w - ((FlowShapes.slantOf(w h)) * 2.0))
-        }
-        if (n.shape == "cylinder") {
-            tall = (h - ((FlowShapes.drumRadius(h)) * 3.0))
-        }
-        if (n.shape == "document") {
-            tall = (h - ((FlowShapes.waveDepth(h)) * 2.0))
-        }
-        if (room < (this.sl(20.0))) {
-            room = (this.sl(20.0))
-        }
-        if (tall < (size * 1.25)) {
-            tall = (size * 1.25)
-        }
+        def box:[double] (this.labelRoomOf(n w h size false))
+        def room:double (itemAt box 0)
+        def tall:double (itemAt box 1)
         def text:string (this.textFor(tag n.label))
         def lay:FlowTextLayout (this.layoutText(text size room tall (this.linesForText(tall size text))))
         def cx:double (FlowShapes.labelCX(n.shape x y w h))
@@ -2079,16 +2083,145 @@ class FlowView {
         return n
     }
 
+    ; How wide and how tall a node's label may be set: [room tall]. A plain
+    ; box gives its inside less a margin; a shape gives what it actually
+    ; leaves to write in — a diamond has only its middle, a right triangle's
+    ; middle is on the hypotenuse.
+    fn labelRoomOf:[double] (n:FlowNode w:double h:double size:double plain:boolean) {
+        def out:[double]
+        if plain {
+            def tallP:double (h - (this.sl(8.0)))
+            if (tallP < (size * 1.25)) {
+                tallP = (size * 1.25)
+            }
+            push out (w - (this.sl(14.0)))
+            push out tallP
+            return out
+        }
+        def room:double (FlowShapes.labelRoom(n.shape w h))
+        def tall:double (h - (this.sl(10.0)))
+        if (n.shape == "diamond") {
+            tall = (h * 0.55)
+        }
+        if (n.shape == "triangle") {
+            tall = (h * 0.4)
+        }
+        if (n.shape == "triangledown") {
+            tall = (h * 0.4)
+        }
+        if (n.shape == "righttriangle") {
+            tall = (h * 0.4)
+        }
+        if (n.shape == "parallelogram") {
+            room = (w - ((FlowShapes.slantOf(w h)) * 2.0))
+        }
+        if (n.shape == "trapezoid") {
+            room = (w - ((FlowShapes.slantOf(w h)) * 2.0))
+        }
+        if (n.shape == "cylinder") {
+            tall = (h - ((FlowShapes.drumRadius(h)) * 3.0))
+        }
+        if (n.shape == "document") {
+            tall = (h - ((FlowShapes.waveDepth(h)) * 2.0))
+        }
+        if (room < (this.sl(20.0))) {
+            room = (this.sl(20.0))
+        }
+        if (tall < (size * 1.25)) {
+            tall = (size * 1.25)
+        }
+        push out room
+        push out tall
+        return out
+    }
+
+    ; Whether a node's label is drawn by `paintShapeLabel` (its outline is
+    ; not a box) rather than `paintPlainLabel`; compartments and groups have
+    ; labels of their own and are not asked.
+    fn shapeLabelled:boolean (n:FlowNode) {
+        if (n.spun()) {
+            return true
+        }
+        if ((FlowShapes.isPlain(n.shape)) == false) {
+            if ((FlowShapes.isDecorated(n.shape)) == false) {
+                return true
+            }
+        }
+        return false
+    }
+
+    ; ------------------------------------------------------------ text fill --
+    ; The largest factor, at most `most`, by which every node label can be set
+    ; larger than the theme says and still fit its box whole: not shrunk, not
+    ; cut, no taller than the box. A document fits its diagram into a column
+    ; and small text is fine there; a slide is read from across a room, and a
+    ; box drawn round small text with air on every side wastes the size the
+    ; box already has. Measured with the same room the painters use.
+    fn textRoom:double (most:double) {
+        def k:double most
+        while (k > 1.0) {
+            if (this.labelsFitAt(k)) {
+                return k
+            }
+            k = (k - 0.05)
+        }
+        return 1.0
+    }
+
+    fn labelsFitAt:boolean (k:double) {
+        def i:int 0
+        while (i < (graph.nodeCount())) {
+            def n:FlowNode (graph.nodeAt(i))
+            def asked:boolean true
+            if n.hidden { asked = false }
+            if (n.nodeType == "group") { asked = false }
+            if ((n.sectionCount()) > 0) { asked = false }
+            if ((strlen (trim n.label)) == 0) { asked = false }
+            if asked {
+                def plain:boolean ((this.shapeLabelled(n)) == false)
+                def size:double (this.sl((theme.headerFontSize * k)))
+                if (plain == false) {
+                    size = (size * n.fontScale)
+                }
+                def w:double (this.sl(n.width))
+                def h:double (this.sl(n.height))
+                def box:[double] (this.labelRoomOf(n w h size plain))
+                def tall:double (itemAt box 1)
+                def lay:FlowTextLayout (this.layoutText(n.label size (itemAt box 0) tall (this.linesForText(tall size n.label))))
+                if lay.truncated {
+                    return false
+                }
+                if (lay.size < (size * 0.999)) {
+                    return false
+                }
+                if (lay.height > (h - (this.sl(4.0)))) {
+                    return false
+                }
+            }
+            i = (i + 1)
+        }
+        return true
+    }
+
+    ; Set the labels as large as `textRoom` allows; the edge labels grow by
+    ; the same factor so a branch's "yes" stays in step with its boxes.
+    ; Returns the factor used.
+    fn fillText:double (most:double) {
+        def k:double (this.textRoom(most))
+        theme.headerFontSize = (theme.headerFontSize * k)
+        theme.labelFontSize = (theme.labelFontSize * k)
+        labelGrow = k
+        return k
+    }
+
     fn paintPlainLabel:void (sc:FlowScene n:FlowNode x:double y:double w:double h:double tag:string) {
         def size:double (this.sl(theme.headerFontSize))
         if ((this.drawn(size)) < labelFloorPx) {
             return
         }
-        def room:double (w - (this.sl(14.0)))
-        def tall:double (h - (this.sl(8.0)))
-        if (tall < (size * 1.25)) {
-            tall = (size * 1.25)
-        }
+        def box:[double] (this.labelRoomOf(n w h size true))
+        def room:double (itemAt box 0)
+        def tall:double (itemAt box 1)
         def text:string (this.textFor(tag n.label))
         def lay:FlowTextLayout (this.layoutText(text size room tall (this.linesForText(tall size text))))
         def cx:double (x + (w * 0.5))
