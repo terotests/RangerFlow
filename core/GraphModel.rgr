@@ -2000,6 +2000,43 @@ class FlowGraph {
         return out
     }
 
+    ; What a drawing of the graph covers: the boxes and the routed edges. An
+    ; edge with waypoints may run outside every box (a loop's way back round
+    ; the side, a run over the top into the next column), and a picture cut
+    ; to the boxes alone would cut it off.
+    fn drawnBounds:FlowRect () {
+        def out:FlowRect (this.bounds())
+        if (out.valid == false) {
+            return out
+        }
+        def x0:double out.x
+        def y0:double out.y
+        def x1:double (out.x + out.w)
+        def y1:double (out.y + out.h)
+        def e:int 0
+        while (e < (array_length edges)) {
+            def ed:FlowEdge (itemAt edges e)
+            if (ed.hidden == false) {
+                def k:int 0
+                while ((k + 1) < (array_length ed.waypoints)) {
+                    def px:double (itemAt ed.waypoints k)
+                    def py:double (itemAt ed.waypoints (k + 1))
+                    if (px < x0) { x0 = px }
+                    if (py < y0) { y0 = py }
+                    if (px > x1) { x1 = px }
+                    if (py > y1) { y1 = py }
+                    k = (k + 2)
+                }
+            }
+            e = (e + 1)
+        }
+        out.x = x0
+        out.y = y0
+        out.w = (x1 - x0)
+        out.h = (y1 - y0)
+        return out
+    }
+
     ; Degree counts, which forceLink needs for its per-link strength and the
     ; view uses to size a node in the demo graph.
     fn degrees:[int] () {

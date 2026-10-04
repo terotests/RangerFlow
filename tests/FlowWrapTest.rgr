@@ -3,6 +3,7 @@
 ;   npm run rangerflow:wrap:test
 Import "../domains/mermaid/MermaidRender.rgr"
 Import "../layout/FlowWrap.rgr"
+Import "../domains/graphviz/DotRender.rgr"
 
 class FlowWrapTest {
     def fails:int 0
@@ -163,6 +164,45 @@ class FlowWrapTest {
         def g6:FlowGraph (FlowWrapTest.graphOf("flowchart TB\n  A --> B\n  B --> C\n  C --> D\n  D --> E\n  E --> F\n  F --> G\n  G --> H\n  H --> A\n"))
         def loop (new FlowWrap())
         this.ok((! (loop.apply(g6 1.5 6))) "a flow that loops back to its start is not cut")
+        this.edgesInside()
+    }
+
+    ; Runs between columns go below one column and above the next, and a
+    ; loop's way back goes round the side: the drawing's box holds all of
+    ; them, so nothing is cut off at its edge.
+    fn edgesInside:void () {
+        def dot:string ("digraph {\n  rankdir=TB;\n  node [shape=box];\n  UI [label=\"excavator-ui\"];\n"
+            + "  MAS [label=\"MachineAppService\"];\n  PUB [label=\"SharePublisher\"];\n  MAN [label=\"Manage\"];\n"
+            + "  REC [label=\"ShareReceiver\"];\n  DB [label=\"Project DB\"];\n  UI -> MAS -> PUB -> MAN;\n"
+            + "  MAN -> REC -> DB;\n  REC -> MAS [style=dashed, label=\"republish\"];\n}\n")
+        def aspects:[double] ([] _:double (2.44 1.78 1.0))
+        def a:int 0
+        while (a < (array_length aspects)) {
+            def sc:FlowScene (DotRender.sceneWrappedStyled(dot (FlowStyle.named("default")) 0.0 20.0 (itemAt aspects a)))
+            def outside:int 0
+            def paths:int 0
+            def i:int 0
+            while (i < (array_length sc.items)) {
+                def it:SceneItem (itemAt sc.items i)
+                if (it.kind == 2) {
+                    paths = (paths + 1)
+                    def k:int 0
+                    while ((k + 1) < (array_length it.pts)) {
+                        def px:double (itemAt it.pts k)
+                        def py:double (itemAt it.pts (k + 1))
+                        if ((((px < -0.5) || (py < -0.5)) || (px > (sc.worldW + 0.5))) || (py > (sc.worldH + 0.5))) {
+                            outside = (outside + 1)
+                        }
+                        k = (k + 2)
+                    }
+                }
+                i = (i + 1)
+            }
+            def tag:string (to_string (itemAt aspects a))
+            this.ok((paths >= 6) ("the edges are drawn at aspect " + tag + ": " + (to_string paths)))
+            this.ok((outside == 0) ("every edge point is inside the drawing at aspect " + tag + ": " + (to_string outside) + " outside " + (to_string sc.worldW) + "x" + (to_string sc.worldH)))
+            a = (a + 1)
+        }
     }
 
     sfn main:void () {
