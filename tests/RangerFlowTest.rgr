@@ -199,6 +199,7 @@ class RangerFlowTest {
         RangerFlowTest.testDataBinding(c)
         RangerFlowTest.testTextFitting(c)
         RangerFlowTest.testSlideText(c)
+        RangerFlowTest.testEdgeLabelRoom(c)
         RangerFlowTest.testInPlaceEditing(c)
         RangerFlowTest.testSideHandles(c)
         RangerFlowTest.testNoStuckModes(c)
@@ -7501,6 +7502,87 @@ class RangerFlowTest {
             i = (i + 1)
         }
         return most
+    }
+
+    ; The smallest gap between any edge label's box and any node's box in a
+    ; scene, and the labels' words as drawn (all lines, in order).
+    sfn labelGap:double (sc:FlowScene) {
+        def least:double 1000000.0
+        def i:int 0
+        while (i < (array_length sc.items)) {
+            def a:SceneItem (itemAt sc.items i)
+            if ((a.kind == 0) && ((a.tag.indexOf("edge:")) == 0)) {
+                def j:int 0
+                while (j < (array_length sc.items)) {
+                    def b:SceneItem (itemAt sc.items j)
+                    if ((b.kind == 0) && ((b.tag.indexOf("node:")) == 0)) {
+                        def dx:double 0.0
+                        if ((a.x + a.w) < b.x) { dx = (b.x - (a.x + a.w)) }
+                        if ((b.x + b.w) < a.x) { dx = (a.x - (b.x + b.w)) }
+                        def dy:double 0.0
+                        if ((a.y + a.h) < b.y) { dy = (b.y - (a.y + a.h)) }
+                        if ((b.y + b.h) < a.y) { dy = (a.y - (b.y + b.h)) }
+                        def gap:double dx
+                        if (dy > gap) { gap = dy }
+                        if ((dx <= 0.0) && (dy <= 0.0)) { gap = -1.0 }
+                        if (gap < least) { least = gap }
+                    }
+                    j = (j + 1)
+                }
+            }
+            i = (i + 1)
+        }
+        return least
+    }
+
+    sfn labelWords:string (sc:FlowScene) {
+        def out:string ""
+        def i:int 0
+        while (i < (array_length sc.items)) {
+            def it:SceneItem (itemAt sc.items i)
+            if ((it.kind == 1) && ((it.tag.indexOf("edge:")) == 0)) {
+                out = (out + " " + it.text)
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+
+    ; Two boxes, two lines, each with a 15-20 character label: grown to fill
+    ; a slide, a label stops short of the boxes at either end, and every word
+    ; of it is drawn.
+    sfn testEdgeLabelRoom:void (c:Checker) {
+        c.section("Edge labels keep clear of the boxes")
+        def dirs:[string] ([] _:string ("TB" "LR"))
+        def fills:[double] ([] _:double (1.0 1.8))
+        def kinds:[string] ([] _:string ("both ways" "same way"))
+        def d:int 0
+        while (d < (array_length dirs)) {
+            def k:int 0
+            while (k < (array_length kinds)) {
+                def back:string "  B -> A [label=\"palauttaa kuittauksen\"];\n"
+                if (k == 1) {
+                    back = "  A -> B [label=\"peruu vanhan tilauksen\"];\n"
+                }
+                def dot:string ("digraph {\n  rankdir=" + (itemAt dirs d) + ";\n  node [shape=box];\n"
+                    + "  A [label=\"Asiakas\"];\n  B [label=\"Palvelin\"];\n"
+                    + "  A -> B [label=\"lähettää tilauksen\"];\n" + back + "}\n")
+                def f:int 0
+                while (f < (array_length fills)) {
+                    def st:FlowStyle (FlowStyle.named("default"))
+                    st.textFill = (itemAt fills f)
+                    def sc:FlowScene (DotRender.sceneWrappedStyled(dot st 0.0 20.0 2.44))
+                    def what:string ((itemAt dirs d) + ", " + (itemAt kinds k) + ", fill " + (to_string (itemAt fills f)))
+                    def gap:double (RangerFlowTest.labelGap(sc))
+                    c.ok(("a label stays 6 or more from the boxes (" + what + "): " + (to_string gap)) (gap >= 6.0))
+                    def words:string (RangerFlowTest.labelWords(sc))
+                    c.ok(("every word of the labels is drawn (" + what + "):" + words) (((words.indexOf("lähettää")) >= 0) && ((words.indexOf("tilauksen")) >= 0)))
+                    f = (f + 1)
+                }
+                k = (k + 1)
+            }
+            d = (d + 1)
+        }
     }
 
     sfn testSlideText:void (c:Checker) {
