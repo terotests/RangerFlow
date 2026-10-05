@@ -122,6 +122,11 @@ class CompoundLayout {
     ; Across the page the layer gap also holds the edge labels, which are
     ; written along the flow: the floor is whatever the longest needs.
     def labelRoomLR:boolean true
+    ; How much larger than the sheet's sizes the labels are set
+    ; (`FlowStyle.textFill`: more on a slide). The room a label needs grows
+    ; with it: at a slide's sizes the floor that held a label in a document
+    ; left it no stretch of its own line, and it was set over the next one.
+    def labelScale:double 1.0
     ; Handed to every layered layout this runs — see `LayoutMemo`.
     def memo:FlowLayoutMemo (new FlowLayoutMemo)
 
@@ -292,7 +297,7 @@ class CompoundLayout {
             lay.minLayerGap = minLayerGapLR
             if labelRoomLR {
                 def chars:int (lay.longestLabel())
-                def labelRoom:double (((to_double chars) * 6.6) + 48.0)
+                def labelRoom:double ((((to_double chars) * 6.6) * labelScale) + 48.0)
                 if (labelRoom > lay.minLayerGap) {
                     lay.minLayerGap = labelRoom
                 }

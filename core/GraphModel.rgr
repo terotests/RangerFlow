@@ -2027,6 +2027,19 @@ class FlowGraph {
                     if (py > y1) { y1 = py }
                     k = (k + 2)
                 }
+                ; A line from a box to itself that nothing routed is drawn by
+                ; the stepped router out of its side and back, a stub (20)
+                ; clear of the box: off the top box, outside the boxes'
+                ; bounds, and cut off with its name.
+                if ((((array_length ed.waypoints) < 4) && (ed.sourceIndex >= 0)) && (ed.sourceIndex == ed.targetIndex)) {
+                    def ln:FlowNode (itemAt nodes ed.sourceIndex)
+                    def side:int (this.edgeSide(ed true))
+                    def reach:double 24.0
+                    if ((side == 0) && ((ln.y - reach) < y0)) { y0 = (ln.y - reach) }
+                    if ((side == 2) && (((ln.y + ln.height) + reach) > y1)) { y1 = ((ln.y + ln.height) + reach) }
+                    if ((side == 3) && ((ln.x - reach) < x0)) { x0 = (ln.x - reach) }
+                    if ((side == 1) && (((ln.x + ln.width) + reach) > x1)) { x1 = ((ln.x + ln.width) + reach) }
+                }
             }
             e = (e + 1)
         }

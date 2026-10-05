@@ -84,6 +84,17 @@ class EdgeLanes {
         return (el.apply(g))
     }
 
+    ; The same, with the slots on one side `gap` apart rather than
+    ; `fanGap`: an ER diagram's lines carry names, and a name centred on its
+    ; line must not lie over the next line along the side.
+    sfn assignSpaced:int (g:FlowGraph gap:double) {
+        def el (new EdgeLanes)
+        if (gap > el.fanGap) {
+            el.fanGap = gap
+        }
+        return (el.apply(g))
+    }
+
     ; Returns the number of edges that were moved off their default track.
     fn apply:int (g:FlowGraph) {
         def n:int (g.edgeCount())

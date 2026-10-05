@@ -646,7 +646,11 @@ class MermaidStateFlow {
             lay.layerGap = 120.0
             lay.nodeGap = 36.0
             def chars:int (lay.longestLabel())
-            def labelRoom:double (((to_double chars) * 6.6) + 48.0)
+            def fill:double 1.0
+            if (style.textFill > 1.0) {
+                fill = style.textFill
+            }
+            def labelRoom:double ((((to_double chars) * 6.6) * fill) + 48.0)
             lay.minLayerGap = 72.0
             if (labelRoom > 72.0) {
                 lay.minLayerGap = labelRoom
