@@ -1,0 +1,651 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ============================================================================
+; FlowLook.rgr — the presentation looks of a diagram, as data.
+; ============================================================================
+;
+; `FlowStyles` colours a diagram the way a document wants it: the same boxes
+; and lines, in other inks. A look is more than an ink. "Mermaid" is pastel
+; cards on a plus-dotted grid; "jurassic" is a poster: ochre circles, grey
+; diamonds, black heavy lines turning square corners; "cartoon" is chunky
+; speech bubbles with fat outlines and an offset shadow; "romantic" is black
+; caption boxes and terracotta circles joined by dashed lines.
+;
+; Every look is a description, not a painter. A host (Sliqtly's slide
+; diagrams) reads it and draws; this file holds the numbers and the few rules
+; that are true of a look whatever draws it:
+;
+;   kindOf      which of a look's four parts a node is drawn as (box, round,
+;               decision, start), from the outline the scene gave it
+;   textOn      the text colour that reads on a fill (dark or light ink)
+;   contrast    the WCAG contrast ratio, so a test can hold every look to it
+;   roundCorners a square route with its corners rounded, ends kept
+;
+; Each look has a light-ground and a dark-ground variant: the slide decides
+; which (`named(name, light)`), the way holo turns its light lines dark on a
+; white slide.
+; ============================================================================
+
+Import "pkg:evg/EVGColor.rgr"
+
+; How one kind of node is drawn.
+class FlowLookPart {
+    ; "keep" (the scene's own outline), "circle" (a circle or an oval round
+    ; the box), "bubble" (a box with a speech tail)
+    def form:string "keep"
+    ; "" = the look's palette, cycled in reveal order
+    def fill:string ""
+    def stroke:string ""
+    def strokeWidth:double 1.5
+    ; "" = whatever reads on the fill (`FlowLook.textOn`)
+    def text:string ""
+    def font:string "Open Sans"
+    def bold:boolean false
+    def italic:boolean false
+    def upper:boolean false
+
+    Constructor () {
+    }
+
+    sfn of:FlowLookPart (form:string fill:string stroke:string width:double) {
+        def p (new FlowLookPart())
+        p.form = form
+        p.fill = fill
+        p.stroke = stroke
+        p.strokeWidth = width
+        return p
+    }
+
+    fn face:FlowLookPart (font:string bold:boolean italic:boolean upper:boolean) {
+        this.font = font
+        this.bold = bold
+        this.italic = italic
+        this.upper = upper
+        return this
+    }
+}
+
+class FlowLook {
+    def name:string ""
+    def light:boolean true
+
+    ; the ground: 0 none, 1 dots, 2 plus signs and dots (Mermaid's), 3 lines
+    def grid:int 0
+    def gridColor:string ""
+    def gridAlpha:double 1.0
+    def gridStep:double 40.0
+
+    ; fills cycled over the nodes in reveal order, and their outlines
+    ; ("" = the part's own stroke)
+    def palette:[string]
+    def paletteStroke:[string]
+
+    def box:FlowLookPart (new FlowLookPart())
+    def round:FlowLookPart (new FlowLookPart())
+    def decision:FlowLookPart (new FlowLookPart())
+    def start:FlowLookPart (new FlowLookPart())
+
+    ; a box's corner radius (diagram units)
+    def radius:double 6.0
+    ; the shadow: an offset copy of the shape; "" = none, "darker" = the
+    ; fill darkened by `shadowDarken`
+    def shadow:string ""
+    def shadowDx:double 0.0
+    def shadowDy:double 0.0
+    def shadowAlpha:double 1.0
+    def shadowDarken:double 0.35
+    ; a white highlight stroke inside a shape (cartoon)
+    def shine:boolean false
+
+    ; lines: "curve" (the router's route rounded into a curve) or "square"
+    ; (its right angles kept, the corners rounded by `corner`)
+    def edgeForm:string "curve"
+    def corner:double 10.0
+    def edgeColor:string "#333333"
+    def edgeWidth:double 1.6
+    ; 0 solid, else the dash length
+    def edgeDash:double 0.0
+    ; "solid" (a filled triangle), "open" (two strokes), "none"
+    def arrow:string "solid"
+    def arrowSize:double 10.0
+    ; dots where a line leaves and enters a box, and the boxes numbered
+    def dots:boolean false
+    def numbers:boolean false
+
+    ; a line's name: "plain" (text on a patch of ground), "box" (a dashed
+    ; frame), "pill" (a rounded chip)
+    def labelForm:string "plain"
+    def labelFill:string ""
+    def labelStroke:string ""
+    def labelText:string "#333333"
+    def labelFont:string "Open Sans"
+    def labelBold:boolean false
+    def labelItalic:boolean false
+    def labelUpper:boolean false
+
+    ; the tour's colour: the active line and the travelling dot; the dot
+    ; bounces (cartoon) or glides
+    def accent:string "#e8a92e"
+    def bounce:boolean false
+
+    Constructor () {
+        def p:[string]
+        palette = p
+        def s:[string]
+        paletteStroke = s
+    }
+
+    sfn names:string () {
+        return "mermaid jurassic cartoon romantic"
+    }
+
+    sfn knows:boolean (name:string) {
+        def n:string (trim name)
+        return ((((n == "mermaid") || (n == "jurassic")) || (n == "cartoon")) || (n == "romantic"))
+    }
+
+    ; The look by name for a light or a dark ground; an unknown name is the
+    ; mermaid look (a host checks `knows` first).
+    sfn named:FlowLook (name:string light:boolean) {
+        def n:string (trim name)
+        if (n == "jurassic") {
+            return (FlowLook.jurassic(light))
+        }
+        if (n == "cartoon") {
+            return (FlowLook.cartoon(light))
+        }
+        if (n == "romantic") {
+            return (FlowLook.romantic(light))
+        }
+        return (FlowLook.mermaid(light))
+    }
+
+    ; ----------------------------------------------------------- the looks --
+    ; Pastel cards with a stronger outline of the same hue, a soft shadow,
+    ; square lines with round corners, on Mermaid's plus-and-dot grid.
+    sfn mermaid:FlowLook (light:boolean) {
+        def k (new FlowLook())
+        k.name = "mermaid"
+        k.light = light
+        k.grid = 2
+        k.gridStep = 36.0
+        k.radius = 3.0
+        k.shadow = "#000000"
+        k.shadowDx = 4.0
+        k.shadowDy = 4.0
+        k.edgeForm = "square"
+        k.corner = 10.0
+        k.arrow = "solid"
+        k.labelForm = "plain"
+        k.bounce = false
+        if light {
+            k.gridColor = "#a9d3df"
+            k.gridAlpha = 0.6
+            k.palette = ([] _:string ("#f9f0ff" "#effaf6" "#edf9fc" "#fdf5ea" "#fffbe6" "#fdeff3"))
+            k.paletteStroke = ([] _:string ("#c86ee0" "#4fc4a8" "#4dbfd9" "#ee9346" "#d9b43c" "#e0789a"))
+            k.shadowAlpha = 0.08
+            k.edgeColor = "#2e2e38"
+            k.labelText = "#2e2e38"
+            k.accent = "#ee9346"
+        } {
+            k.gridColor = "#9fd8ea"
+            k.gridAlpha = 0.18
+            k.palette = ([] _:string ("#33243f" "#1d3a33" "#183743" "#3d2b1b" "#3a3417" "#3d2230"))
+            k.paletteStroke = ([] _:string ("#d48cf0" "#5fd8b9" "#5fd0ea" "#f5a560" "#e8c85a" "#ee8fb0"))
+            k.shadowAlpha = 0.35
+            k.edgeColor = "#dfe3ef"
+            k.labelText = "#dfe3ef"
+            k.accent = "#f5a560"
+        }
+        k.box = (FlowLookPart.of("keep" "" "" 1.8))
+        k.round = (FlowLookPart.of("keep" "" "" 1.8))
+        k.decision = (FlowLookPart.of("keep" "" "" 1.8))
+        k.start = (FlowLookPart.of("keep" "" "" 1.8))
+        return k
+    }
+
+    ; A poster: white caption boxes with a black frame, ochre circles for the
+    ; places the flow arrives at, grey diamonds for the questions, a black
+    ; circle to start from; heavy black lines that turn square corners.
+    sfn jurassic:FlowLook (light:boolean) {
+        def k (new FlowLook())
+        k.name = "jurassic"
+        k.light = light
+        k.grid = 0
+        k.radius = 2.0
+        k.edgeForm = "square"
+        k.corner = 16.0
+        k.edgeWidth = 2.6
+        k.arrow = "solid"
+        k.arrowSize = 11.0
+        k.labelForm = "box"
+        k.labelBold = true
+        k.labelUpper = true
+        k.labelFont = "Josefin Sans"
+        k.accent = "#e8a92e"
+        def ochre:string "#e8a92e"
+        if light {
+            k.edgeColor = "#111111"
+            k.box = (FlowLookPart.of("keep" "#ffffff" "#111111" 1.6))
+            k.decision = (FlowLookPart.of("keep" "#cfcfcf" "#cfcfcf" 1.0))
+            k.start = (FlowLookPart.of("circle" "#111111" "#111111" 1.0))
+            k.labelFill = "#ffffff"
+            k.labelStroke = "#111111"
+            k.labelText = "#111111"
+        } {
+            k.edgeColor = "#efe7d6"
+            k.box = (FlowLookPart.of("keep" "#1a1a1a" "#efe7d6" 1.6))
+            k.decision = (FlowLookPart.of("keep" "#5b5b5b" "#5b5b5b" 1.0))
+            k.start = (FlowLookPart.of("circle" "#efe7d6" "#efe7d6" 1.0))
+            k.labelFill = "#1a1a1a"
+            k.labelStroke = "#efe7d6"
+            k.labelText = "#efe7d6"
+        }
+        k.round = (FlowLookPart.of("circle" ochre ochre 1.0))
+        k.box.face("Josefin Sans" true false true)
+        k.round.face("Josefin Sans" true false true)
+        k.decision.face("Josefin Sans" true false true)
+        k.start.face("Josefin Sans" true false true)
+        return k
+    }
+
+    ; Chunky speech bubbles in saturated colours, a fat dark outline, an
+    ; offset shadow in a darker shade of the fill, a highlight stroke; fat
+    ; lines with dots where they meet the boxes, the boxes numbered.
+    sfn cartoon:FlowLook (light:boolean) {
+        def k (new FlowLook())
+        k.name = "cartoon"
+        k.light = light
+        k.grid = 0
+        k.radius = 10.0
+        k.shadow = "darker"
+        k.shadowDx = 7.0
+        k.shadowDy = 8.0
+        k.shadowDarken = 0.38
+        k.shine = true
+        k.edgeForm = "square"
+        k.corner = 18.0
+        k.edgeWidth = 3.4
+        k.arrow = "none"
+        k.dots = true
+        k.numbers = true
+        k.labelForm = "box"
+        k.labelUpper = true
+        k.labelFont = "Gloria Hallelujah"
+        k.bounce = true
+        k.accent = "#f2a53a"
+        k.palette = ([] _:string ("#5cc8c0" "#b04fb5" "#f2a53a" "#e9de4f" "#3fb6d9" "#2f6278" "#7a3b8f"))
+        def ink:string "#1b1b1b"
+        if light {
+            k.edgeColor = ink
+            k.labelFill = "#ffffff"
+            k.labelStroke = "#1b1b1b"
+            k.labelText = "#1b1b1b"
+        } {
+            k.edgeColor = "#f4f1e8"
+            k.labelFill = "#1b1b1b"
+            k.labelStroke = "#f4f1e8"
+            k.labelText = "#f4f1e8"
+        }
+        k.box = (FlowLookPart.of("bubble" "" ink 3.0))
+        k.round = (FlowLookPart.of("circle" "" ink 3.0))
+        k.decision = (FlowLookPart.of("keep" "" ink 3.0))
+        k.start = (FlowLookPart.of("circle" "" ink 3.0))
+        k.box.face("Gloria Hallelujah" false false true)
+        k.round.face("Gloria Hallelujah" false false true)
+        k.decision.face("Gloria Hallelujah" false false true)
+        k.start.face("Gloria Hallelujah" false false true)
+        return k
+    }
+
+    ; A wedding invitation: condensed capitals on black caption boxes,
+    ; terracotta circles with italic serif words, thin dashed connectors and
+    ; small capital notes on the lines.
+    sfn romantic:FlowLook (light:boolean) {
+        def k (new FlowLook())
+        k.name = "romantic"
+        k.light = light
+        k.grid = 0
+        k.radius = 0.0
+        k.edgeForm = "square"
+        k.corner = 0.0
+        k.edgeWidth = 1.4
+        k.edgeDash = 5.0
+        k.arrow = "open"
+        k.arrowSize = 9.0
+        k.labelForm = "plain"
+        k.labelUpper = true
+        k.labelFont = "Fjalla One"
+        k.accent = "#b5562f"
+        def terra:string "#b5562f"
+        if light {
+            k.edgeColor = "#2a2522"
+            k.labelText = "#2a2522"
+            k.box = (FlowLookPart.of("keep" "#211d1b" "#211d1b" 1.0))
+            k.decision = (FlowLookPart.of("keep" "#f3ecdd" "#211d1b" 1.4))
+            k.start = (FlowLookPart.of("keep" "#211d1b" "#211d1b" 1.0))
+        } {
+            k.edgeColor = "#f1e8d6"
+            k.labelText = "#f1e8d6"
+            k.box = (FlowLookPart.of("keep" "#f3ecdd" "#f3ecdd" 1.0))
+            k.decision = (FlowLookPart.of("keep" "#2a2522" "#f1e8d6" 1.4))
+            k.start = (FlowLookPart.of("keep" "#f3ecdd" "#f3ecdd" 1.0))
+        }
+        k.round = (FlowLookPart.of("circle" terra terra 1.0))
+        k.box.face("Fjalla One" false false true)
+        k.start.face("Fjalla One" false false true)
+        k.decision.face("Fjalla One" false false true)
+        k.round.face("Droid Serif" true true false)
+        return k
+    }
+
+    ; ------------------------------------------------------------- reading --
+    fn partFor:FlowLookPart (kind:string) {
+        if (kind == "round") {
+            return round
+        }
+        if (kind == "decision") {
+            return decision
+        }
+        if (kind == "start") {
+            return start
+        }
+        return box
+    }
+
+    ; The fill of a node of `kind`, the `order`th in the reveal.
+    fn fillOf:string (kind:string order:int) {
+        def p:FlowLookPart (this.partFor(kind))
+        if ((strlen p.fill) > 0) {
+            return p.fill
+        }
+        def n:int (array_length palette)
+        if (n == 0) {
+            return "#ffffff"
+        }
+        def o:int order
+        if (o < 0) {
+            o = 0
+        }
+        return (itemAt palette (o - ((idiv o n) * n)))
+    }
+
+    fn strokeOf:string (kind:string order:int) {
+        def p:FlowLookPart (this.partFor(kind))
+        if ((strlen p.stroke) > 0) {
+            return p.stroke
+        }
+        def n:int (array_length paletteStroke)
+        if (n == 0) {
+            return edgeColor
+        }
+        def o:int order
+        if (o < 0) {
+            o = 0
+        }
+        return (itemAt paletteStroke (o - ((idiv o n) * n)))
+    }
+
+    fn textOf:string (kind:string order:int) {
+        def p:FlowLookPart (this.partFor(kind))
+        if ((strlen p.text) > 0) {
+            return p.text
+        }
+        return (FlowLook.textOn((this.fillOf(kind order))))
+    }
+
+    ; The shadow's colour for a fill ("" = no shadow).
+    fn shadowOf:string (fill:string) {
+        if (shadow == "darker") {
+            def c:EVGColor (EVGColor.parse(fill))
+            def d:EVGColor (c.darken(shadowDarken))
+            return (d.toHexString())
+        }
+        return shadow
+    }
+
+    ; The faces a host has to have loaded to draw this look.
+    fn faces:[string] () {
+        def out:[string]
+        def all:[string] ([] _:string ((FlowLook.faceName(box.font box.bold box.italic)) (FlowLook.faceName(round.font round.bold round.italic)) (FlowLook.faceName(decision.font decision.bold decision.italic)) (FlowLook.faceName(start.font start.bold start.italic)) (FlowLook.faceName(labelFont labelBold labelItalic))))
+        def i:int 0
+        while (i < (array_length all)) {
+            def f:string (itemAt all i)
+            def seen:boolean false
+            def j:int 0
+            while (j < (array_length out)) {
+                if ((itemAt out j) == f) {
+                    seen = true
+                }
+                j = (j + 1)
+            }
+            if (seen == false) {
+                push out f
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+
+    ; "Droid Serif-BoldItalic": the family and its weight/slant, the way the
+    ; EVG font table names a face.
+    sfn faceName:string (font:string bold:boolean italic:boolean) {
+        if (bold && italic) {
+            return (font + "-BoldItalic")
+        }
+        if bold {
+            return (font + "-Bold")
+        }
+        if italic {
+            return (font + "-Italic")
+        }
+        return font
+    }
+
+    ; ------------------------------------------------------------ geometry --
+    ; Which part of a look a node is drawn as, from the shape the scene gave
+    ; it: `ring` is its outline when it is not a box (x, y pairs; empty for a
+    ; box), `radius` the box's corner radius. A diamond (four points at the
+    ; middles of its bounds' sides) is a decision; a box rounded to a stadium,
+    ; or an outline with many points that keeps clear of its corners (a circle,
+    ; an ellipse), is round; anything else is a box.
+    sfn kindOf:string (ring:[double] x:double y:double w:double h:double radius:double) {
+        def n:int (idiv (array_length ring) 2)
+        if (n < 3) {
+            def least:double w
+            if (h < least) {
+                least = h
+            }
+            if ((least > 0.0) && (radius >= (least * 0.45))) {
+                return "round"
+            }
+            return "box"
+        }
+        if (n == 4) {
+            def mids:int 0
+            def i:int 0
+            while (i < 4) {
+                def px:double (itemAt ring (i * 2))
+                def py:double (itemAt ring ((i * 2) + 1))
+                def onX:boolean ((FlowLook.absD((px - (x + (w * 0.5))))) < (w * 0.08))
+                def onY:boolean ((FlowLook.absD((py - (y + (h * 0.5))))) < (h * 0.08))
+                if (onX || onY) {
+                    mids = (mids + 1)
+                }
+                i = (i + 1)
+            }
+            if (mids == 4) {
+                return "decision"
+            }
+            return "box"
+        }
+        if (n >= 12) {
+            ; a circle stays out of its bounds' corners
+            def cornerD:double ((w + h) * 0.5)
+            def nearest:double 1000000.0
+            def k:int 0
+            while (k < n) {
+                def qx:double (itemAt ring (k * 2))
+                def qy:double (itemAt ring ((k * 2) + 1))
+                def dx:double (FlowLook.minAbs((qx - x) (qx - (x + w))))
+                def dy:double (FlowLook.minAbs((qy - y) (qy - (y + h))))
+                def d:double (dx + dy)
+                if (d < nearest) {
+                    nearest = d
+                }
+                k = (k + 1)
+            }
+            if (nearest > (cornerD * 0.12)) {
+                return "round"
+            }
+        }
+        return "box"
+    }
+
+    sfn absD:double (v:double) {
+        if (v < 0.0) {
+            return (0.0 - v)
+        }
+        return v
+    }
+
+    sfn minAbs:double (a:double b:double) {
+        def x:double (FlowLook.absD(a))
+        def y:double (FlowLook.absD(b))
+        if (x < y) {
+            return x
+        }
+        return y
+    }
+
+    ; The circle (or oval) a "circle" part draws round a w×h box, as
+    ; [cx, cy, rx, ry]: a true circle while the box is near square, an oval a
+    ; little larger than the box otherwise, so the words inside still fit
+    ; and the neighbours the layout placed are not covered.
+    sfn circleFor:[double] (x:double y:double w:double h:double) {
+        def cx:double (x + (w * 0.5))
+        def cy:double (y + (h * 0.5))
+        if (w <= (h * 1.5)) {
+            def d:double w
+            if (h > d) {
+                d = h
+            }
+            def r:double (d * 0.56)
+            return ([] _:double (cx cy r r))
+        }
+        return ([] _:double (cx cy (w * 0.56) (h * 0.72)))
+    }
+
+    ; A polyline's right-angle corners rounded with arcs of radius `r` (less
+    ; where a run is too short for it); the first and last point stay where
+    ; they were. r <= 0 returns the points as they are.
+    sfn roundCorners:[double] (pts:[double] r:double) {
+        def n:int (idiv (array_length pts) 2)
+        def out:[double]
+        if ((n < 3) || (r <= 0.0)) {
+            def c:int 0
+            while (c < (array_length pts)) {
+                push out (itemAt pts c)
+                c = (c + 1)
+            }
+            return out
+        }
+        push out (itemAt pts 0)
+        push out (itemAt pts 1)
+        def i:int 1
+        while (i < (n - 1)) {
+            def ax:double (itemAt pts ((i - 1) * 2))
+            def ay:double (itemAt pts (((i - 1) * 2) + 1))
+            def bx:double (itemAt pts (i * 2))
+            def by:double (itemAt pts ((i * 2) + 1))
+            def cx:double (itemAt pts ((i + 1) * 2))
+            def cy:double (itemAt pts (((i + 1) * 2) + 1))
+            def l1:double (sqrt (((bx - ax) * (bx - ax)) + ((by - ay) * (by - ay))))
+            def l2:double (sqrt (((cx - bx) * (cx - bx)) + ((cy - by) * (cy - by))))
+            def rr:double r
+            if (rr > (l1 * 0.5)) {
+                rr = (l1 * 0.5)
+            }
+            if (rr > (l2 * 0.5)) {
+                rr = (l2 * 0.5)
+            }
+            if ((rr < 0.5) || ((l1 <= 0.0) || (l2 <= 0.0))) {
+                push out bx
+                push out by
+            } {
+                ; from a point rr before the corner to one rr after, along a
+                ; quadratic curve with the corner as its control point
+                def sx:double (bx - (((bx - ax) / l1) * rr))
+                def sy:double (by - (((by - ay) / l1) * rr))
+                def ex:double (bx + (((cx - bx) / l2) * rr))
+                def ey:double (by + (((cy - by) / l2) * rr))
+                def k:int 0
+                while (k <= 6) {
+                    def f:double ((to_double k) / 6.0)
+                    def g:double (1.0 - f)
+                    push out ((((g * g) * sx) + (((2.0 * g) * f) * bx)) + ((f * f) * ex))
+                    push out ((((g * g) * sy) + (((2.0 * g) * f) * by)) + ((f * f) * ey))
+                    k = (k + 1)
+                }
+            }
+            i = (i + 1)
+        }
+        push out (itemAt pts ((n - 1) * 2))
+        push out (itemAt pts (((n - 1) * 2) + 1))
+        return out
+    }
+
+    ; ------------------------------------------------------------- colours --
+    sfn luminance:double (hex:string) {
+        def c:EVGColor (EVGColor.parse(hex))
+        def r:double (FlowLook.channel((to_double (c.red()))))
+        def g:double (FlowLook.channel((to_double (c.green()))))
+        def b:double (FlowLook.channel((to_double (c.blue()))))
+        return (((0.2126 * r) + (0.7152 * g)) + (0.0722 * b))
+    }
+
+    sfn channel:double (v:double) {
+        def s:double (v / 255.0)
+        if (s <= 0.03928) {
+            return (s / 12.92)
+        }
+        return (FlowLook.pow24(((s + 0.055) / 1.055)))
+    }
+
+    ; x^2.4 for x in [0, 1]: x² times the fifth root of x² (Newton), as the
+    ; language has no pow
+    sfn pow24:double (x:double) {
+        if (x <= 0.0) {
+            return 0.0
+        }
+        def a:double (x * x)
+        def y:double (sqrt x)
+        def i:int 0
+        while (i < 12) {
+            def y4:double (((y * y) * y) * y)
+            y = (y - (((y4 * y) - a) / (5.0 * y4)))
+            i = (i + 1)
+        }
+        return (a * y)
+    }
+
+    ; The WCAG contrast ratio of two colours, 1 to 21.
+    sfn contrast:double (a:string b:string) {
+        def la:double ((FlowLook.luminance(a)) + 0.05)
+        def lb:double ((FlowLook.luminance(b)) + 0.05)
+        if (la > lb) {
+            return (la / lb)
+        }
+        return (lb / la)
+    }
+
+    ; Dark ink or white, whichever reads better on `fill`.
+    sfn textOn:string (fill:string) {
+        def dark:string "#1b1b1b"
+        def white:string "#ffffff"
+        if ((FlowLook.contrast(fill dark)) >= (FlowLook.contrast(fill white))) {
+            return dark
+        }
+        return white
+    }
+}

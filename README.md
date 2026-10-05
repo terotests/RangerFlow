@@ -328,6 +328,24 @@ Where it differs: text is measured with a font table rather than in a browser,
 so a line can break one word apart from Mermaid's, and a double circle is drawn
 as the UML final node, which is the same two rings.
 
+### Presentation looks
+
+A stylesheet recolours the document's drawing. A **look** (`core/FlowLook.rgr`)
+describes a whole other way to draw it, for a host that animates diagrams on
+slides (Sliqtly's `{style=…}`): `mermaid` (pastel cards on a plus-dotted
+grid), `jurassic` (a poster: ochre circles, grey diamonds, heavy square
+lines), `cartoon` (chunky speech bubbles, fat outlines, offset shadows,
+numbered dots) and `romantic` (black caption boxes, terracotta circles,
+dashed connectors). Each has a light-ground and a dark-ground variant. The
+file is data plus the rules every painter needs: which part a node is drawn
+as (`kindOf`: box, round, decision, start), the ink that reads on a fill
+(`textOn`, WCAG contrast), the oval a circle part draws round a box
+(`circleFor`) and a square route with rounded corners (`roundCorners`).
+
+```bash
+npm run rangerflow:look:test   # every look's text ≥ 4.5:1 on its fills, both grounds; shapes; corners
+```
+
 ### …and class diagrams
 
 Mermaid answers to thirty-eight header keywords and this reads all of them. The second one was already here before the reading started: a `classDiagram` is the UML
