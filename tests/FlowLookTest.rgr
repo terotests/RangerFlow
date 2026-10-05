@@ -1,0 +1,206 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+; FlowLook: the presentation looks (mermaid, jurassic, cartoon, romantic).
+;   npm run rangerflow:look:test
+Import "../core/FlowLook.rgr"
+
+class FlowLookTest {
+    def fails:int 0
+    def passes:int 0
+
+    fn ok:void (cond:boolean what:string) {
+        if cond {
+            passes = (passes + 1)
+        } {
+            fails = (fails + 1)
+            print ("FAIL " + what)
+        }
+    }
+
+    fn run:void () {
+        this.names()
+        this.readable()
+        this.kinds()
+        this.circles()
+        this.corners()
+        this.colours()
+        this.faces()
+    }
+
+    fn names:void () {
+        def all:[string] (strsplit (FlowLook.names()) " ")
+        this.ok(((array_length all) == 4) "four looks")
+        def i:int 0
+        while (i < (array_length all)) {
+            def n:string (itemAt all i)
+            this.ok((FlowLook.knows(n)) ("knows " + n))
+            this.ok(((FlowLook.named(n true)).name == n) ("named " + n + " (light)"))
+            this.ok(((FlowLook.named(n false)).name == n) ("named " + n + " (dark)"))
+            this.ok(((FlowLook.named(n false)).light == false) (n + " dark is dark"))
+            i = (i + 1)
+        }
+        this.ok(((FlowLook.knows("holo")) == false) "holo is not a FlowLook (the host draws it)")
+        this.ok((FlowLook.knows(" cartoon ")) "a name is trimmed")
+    }
+
+    ; Every word a look draws reads on what it is drawn on: a node's text on
+    ; each of its fills, for every kind and every palette slot, and a line's
+    ; name on its patch; the lines stand out from the ground they are on.
+    fn readable:void () {
+        def all:[string] (strsplit (FlowLook.names()) " ")
+        def kinds:[string] ([] _:string ("box" "round" "decision" "start"))
+        def i:int 0
+        while (i < (array_length all)) {
+            def g:int 0
+            while (g < 2) {
+                def light:boolean (g == 0)
+                def k:FlowLook (FlowLook.named((itemAt all i) light))
+                def tag:string (k.name + " " + (FlowLookTest.ground(light)))
+                def ki:int 0
+                while (ki < (array_length kinds)) {
+                    def kind:string (itemAt kinds ki)
+                    def o:int 0
+                    while (o < 7) {
+                        def fill:string (k.fillOf(kind o))
+                        def text:string (k.textOf(kind o))
+                        def c:double (FlowLook.contrast(fill text))
+                        this.ok((c >= 4.5) (tag + " " + kind + " " + (to_string o) + ": text " + text + " on " + fill + " is " + (to_string c)))
+                        o = (o + 1)
+                    }
+                    ki = (ki + 1)
+                }
+                def ground:string "#ffffff"
+                if (light == false) {
+                    ground = "#0b1030"
+                }
+                def patch:string k.labelFill
+                if ((strlen patch) == 0) {
+                    patch = ground
+                }
+                def lc:double (FlowLook.contrast(patch k.labelText))
+                this.ok((lc >= 4.5) (tag + ": a line's name on its patch is " + (to_string lc)))
+                def ec:double (FlowLook.contrast(ground k.edgeColor))
+                this.ok((ec >= 3.0) (tag + ": the lines on the ground are " + (to_string ec)))
+                g = (g + 1)
+            }
+            i = (i + 1)
+        }
+    }
+
+    sfn ground:string (light:boolean) {
+        if light {
+            return "light"
+        }
+        return "dark"
+    }
+
+    fn kinds:void () {
+        def none:[double]
+        this.ok(((FlowLook.kindOf(none 0.0 0.0 120.0 40.0 6.0)) == "box") "a rounded box is a box")
+        this.ok(((FlowLook.kindOf(none 0.0 0.0 120.0 40.0 20.0)) == "round") "a stadium is round")
+        def diamond:[double] ([] _:double (60.0 0.0 120.0 40.0 60.0 80.0 0.0 40.0))
+        this.ok(((FlowLook.kindOf(diamond 0.0 0.0 120.0 80.0 0.0)) == "decision") "a diamond is a decision")
+        def para:[double] ([] _:double (20.0 0.0 120.0 0.0 100.0 40.0 0.0 40.0))
+        this.ok(((FlowLook.kindOf(para 0.0 0.0 120.0 40.0 0.0)) == "box") "a parallelogram is a box")
+        def circle:[double]
+        def k:int 0
+        while (k < 24) {
+            def a:double (((to_double k) / 24.0) * 6.2831853)
+            push circle (50.0 + (50.0 * (cos a)))
+            push circle (50.0 + (50.0 * (sin a)))
+            k = (k + 1)
+        }
+        this.ok(((FlowLook.kindOf(circle 0.0 0.0 100.0 100.0 0.0)) == "round") "a circle is round")
+        def hex:[double] ([] _:double (20.0 0.0 100.0 0.0 120.0 20.0 100.0 40.0 20.0 40.0 0.0 20.0))
+        this.ok(((FlowLook.kindOf(hex 0.0 0.0 120.0 40.0 0.0)) == "box") "a hexagon is a box")
+    }
+
+    fn circles:void () {
+        def sq:[double] (FlowLook.circleFor(0.0 0.0 80.0 60.0))
+        this.ok(((itemAt sq 2) == (itemAt sq 3)) "a near-square box gets a circle")
+        this.ok((((itemAt sq 2) * 2.0) >= 80.0) "the circle holds the box's width")
+        def wide:[double] (FlowLook.circleFor(10.0 20.0 200.0 50.0))
+        this.ok(((itemAt wide 0) == 110.0) "an oval is centred on its box (x)")
+        this.ok(((itemAt wide 1) == 45.0) "an oval is centred on its box (y)")
+        this.ok(((itemAt wide 2) > (itemAt wide 3)) "a wide box gets a wide oval")
+        this.ok(((((itemAt wide 2) * 2.0) < 240.0) && (((itemAt wide 3) * 2.0) < 80.0)) "the oval stays close to its box")
+    }
+
+    fn corners:void () {
+        def l:[double] ([] _:double (0.0 0.0 100.0 0.0 100.0 80.0))
+        def r:[double] (FlowLook.roundCorners(l 10.0))
+        def n:int (array_length r)
+        this.ok(((((itemAt r 0) == 0.0) && ((itemAt r 1) == 0.0)) && (((itemAt r (n - 2)) == 100.0) && ((itemAt r (n - 1)) == 80.0))) "the ends stay")
+        this.ok((n > 6) "the corner is a curve")
+        def through:boolean false
+        def i:int 0
+        while ((i + 1) < n) {
+            if (((itemAt r i) == 100.0) && ((itemAt r (i + 1)) == 0.0)) {
+                through = true
+            }
+            ; nothing on the arc is further than r from the corner
+            def dx:double ((itemAt r i) - 100.0)
+            def dy:double (itemAt r (i + 1))
+            if (((itemAt r i) > 89.0) && ((itemAt r (i + 1)) < 11.0)) {
+                this.ok(((sqrt ((dx * dx) + (dy * dy))) <= 10.01) "the arc stays at the corner")
+            }
+            i = (i + 2)
+        }
+        this.ok((through == false) "the sharp corner is gone")
+        def short:[double] ([] _:double (0.0 0.0 6.0 0.0 6.0 80.0))
+        def rs:[double] (FlowLook.roundCorners(short 10.0))
+        def ok:boolean true
+        def j:int 0
+        while ((j + 1) < (array_length rs)) {
+            if ((itemAt rs j) < 0.0) {
+                ok = false
+            }
+            j = (j + 2)
+        }
+        this.ok(ok "a short run takes a smaller radius")
+        def straight:[double] (FlowLook.roundCorners(l 0.0))
+        this.ok(((array_length straight) == 6) "radius 0 keeps the points")
+    }
+
+    fn colours:void () {
+        this.ok(((FlowLook.textOn("#ffffff")) == "#1b1b1b") "dark ink on white")
+        this.ok(((FlowLook.textOn("#211d1b")) == "#ffffff") "white on black")
+        this.ok(((FlowLook.textOn("#e9de4f")) == "#1b1b1b") "dark ink on yellow")
+        def c:double (FlowLook.contrast("#000000" "#ffffff"))
+        this.ok(((c > 20.9) && (c < 21.1)) ("black on white is 21: " + (to_string c)))
+        def p24:double (FlowLook.pow24(0.5))
+        this.ok(((p24 > 0.1894) && (p24 < 0.1896)) ("0.5^2.4: " + (to_string p24)))
+        def toon:FlowLook (FlowLook.cartoon(true))
+        def sh:string (toon.shadowOf("#5cc8c0"))
+        this.ok(((FlowLook.luminance(sh)) < (FlowLook.luminance("#5cc8c0"))) ("the cartoon shadow is the fill, darker: " + sh))
+        def mer:FlowLook (FlowLook.mermaid(true))
+        this.ok(((mer.shadowOf("#ffffff")) == "#000000") "mermaid's shadow is a soft black")
+        this.ok(((mer.fillOf("box" 6)) == (mer.fillOf("box" 0))) "the palette cycles")
+        this.ok(((mer.strokeOf("box" 1)) != (mer.strokeOf("box" 0))) "each card has its own outline")
+        def jur:FlowLook (FlowLook.jurassic(true))
+        this.ok(((jur.partFor("round")).form == "circle") "jurassic draws round nodes as circles")
+        this.ok(((jur.fillOf("decision" 3)) == "#cfcfcf") "jurassic's questions are grey")
+        def rom:FlowLook (FlowLook.romantic(true))
+        this.ok((rom.edgeDash > 0.0) "romantic lines are dashed")
+        this.ok(((rom.partFor("round")).italic) "romantic circles are italic")
+    }
+
+    fn faces:void () {
+        def rom:FlowLook (FlowLook.romantic(true))
+        def f:[string] (rom.faces())
+        def joined:string (join f ",")
+        this.ok(((indexOf joined "Fjalla One") >= 0) ("romantic needs Fjalla One: " + joined))
+        this.ok(((indexOf joined "Droid Serif-BoldItalic") >= 0) ("and Droid Serif bold italic: " + joined))
+        this.ok(((array_length f) == 2) ("each face once: " + joined))
+        def mer:FlowLook (FlowLook.mermaid(true))
+        this.ok(((join (mer.faces()) ",") == "Open Sans") "mermaid needs only Open Sans")
+    }
+
+    sfn main:void () {
+        def t (new FlowLookTest())
+        t.run()
+        print ((to_string t.passes) + " passed, " + (to_string t.fails) + " failed")
+        if (t.fails > 0) {
+            print "CHECK FAILED"
+        }
+    }
+}
