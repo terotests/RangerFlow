@@ -65,6 +65,7 @@ Import "../../core/FlowStyleSheet.rgr"
 Import "../../layout/LayeredLayout.rgr"
 Import "../../layout/CompoundLayout.rgr"
 Import "../../layout/EdgeLanes.rgr"
+Import "../../layout/EdgeFacing.rgr"
 Import "../../layout/OrthoRouter.rgr"
 
 ; The shape names as Mermaid means them, kept apart from the shape names
@@ -997,6 +998,7 @@ class MermaidDiagram {
             k = (k + 1)
         }
         MermaidDiagram.settleCorners(g horiz)
+        EdgeFacing.faceLoops(g (horiz == false))
     }
 
     ; The L's at one box agree with each other. Lines that meet a box's
@@ -2921,6 +2923,9 @@ class MermaidFlow {
         def cl:CompoundLayout (CompoundLayout.of(g))
         cl.direction = d.direction
         cl.memo = memo
+        if (style.textFill > 1.0) {
+            cl.labelScale = style.textFill
+        }
         d.describeGroups(cl g)
         cl.run()
         def lay:LayeredLayout cl.rootLayout

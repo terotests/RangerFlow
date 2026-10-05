@@ -583,21 +583,97 @@ class MermaidErFlow {
         }
         g.reindex()
         def wrote:int (style.applyTo(g))
+        ; The boxes' own sizes, which `arrange` grows from.
+        def w0:[double]
+        def h0:[double]
+        def m0:[double]
+        def i0:int 0
+        while (i0 < (g.nodeCount())) {
+            def n0:FlowNode (g.nodeAt(i0))
+            push w0 n0.width
+            push h0 n0.height
+            push m0 n0.minHeight
+            i0 = (i0 + 1)
+        }
+        ; Two boxes side by side in one column, each with a line to the same
+        ; box in the next, can leave one line's run out of its box on top of
+        ; the other's run into the far box: two lines drawn as one for a
+        ; stretch. Whether that happens depends on how far apart the boxes in
+        ; a column stand, so a few gaps are tried and the one with the fewest
+        ; lines on each other (then the fewest crossings) is kept.
+        def gaps:[double] ([] _:double (40.0 64.0 96.0))
+        def bestGap:double 40.0
+        def bestScore:int -1
+        def t:int 0
+        while (t < (array_length gaps)) {
+            MermaidErFlow.resetSizes(g w0 h0 m0)
+            MermaidErFlow.arrange(g d style (itemAt gaps t))
+            def score:int (((EdgeOverlap.pairs(g 6.0)) * 100) + (EdgeOverlap.edgeCrossings(g)))
+            if ((bestScore < 0) || (score < bestScore)) {
+                bestScore = score
+                bestGap = (itemAt gaps t)
+            }
+            if (score == 0) {
+                t = (array_length gaps)
+            }
+            t = (t + 1)
+        }
+        if (bestGap != (itemAt gaps ((array_length gaps) - 1))) {
+            MermaidErFlow.resetSizes(g w0 h0 m0)
+            MermaidErFlow.arrange(g d style bestGap)
+        }
+        return g
+    }
+
+    sfn resetSizes:void (g:FlowGraph w0:[double] h0:[double] m0:[double]) {
+        def i:int 0
+        while (i < (g.nodeCount())) {
+            def n:FlowNode (g.nodeAt(i))
+            n.width = (itemAt w0 i)
+            n.height = (itemAt h0 i)
+            n.minHeight = (itemAt m0 i)
+            i = (i + 1)
+        }
+    }
+
+    ; One layout and routing of the boxes, `nodeGap` apart across the flow.
+    sfn arrange:void (g:FlowGraph d:MermaidErDiagram style:FlowStyle nodeGap:double) {
         def lay:LayeredLayout (LayeredLayout.of(g))
         lay.direction = (d.layerDirection())
         lay.layerGap = 150.0
-        lay.nodeGap = 40.0
+        lay.nodeGap = nodeGap
         if ((d.layerDirection()) == "TB") {
             lay.layerGap = 90.0
         }
         lay.run()
         MermaidErFlow.faceEdges(g)
-        def moved:int (EdgeLanes.assign(g))
+        EdgeFacing.faceLoops(g ((d.layerDirection()) == "TB"))
+        ; A first layout says which lines leave which side and how many cross
+        ; each gap between the columns. An entity with no attributes is one
+        ; row high, and six lines out of its right side were fanned four
+        ; units apart: one thick bundle. And a gap of 150 with five tracks in
+        ; it left no run of any line long enough for its name, so the names
+        ; sat on the tracks and on each other. So the boxes grow to hold their
+        ; lines `fanGap` apart, the gap widens to hold its tracks and the
+        ; longest name beside them, and the layout runs again.
+        def gap:double (MermaidErFlow.corridorFor(g (d.layerDirection()) lay.layerGap (MermaidErFlow.labelWidth(g style)) (MermaidErFlow.labelHeight(style))))
+        def endGap:double (MermaidErFlow.endGap(style))
+        def grew:boolean (MermaidErFlow.growForEnds(g endGap))
+        if (grew || (gap > (lay.layerGap + 0.5))) {
+            def lay2:LayeredLayout (LayeredLayout.of(g))
+            lay2.direction = lay.direction
+            lay2.layerGap = gap
+            lay2.nodeGap = lay.nodeGap
+            lay2.run()
+            lay = lay2
+            MermaidErFlow.faceEdges(g)
+            EdgeFacing.faceLoops(g ((d.layerDirection()) == "TB"))
+        }
+        def moved:int (EdgeLanes.assignSpaced(g endGap))
         def routed:int (lay.routeLongEdges())
         EdgeLanes.resetLanes(g)
-        def refanned:int (EdgeLanes.assign(g))
+        def refanned:int (EdgeLanes.assignSpaced(g endGap))
         def repaired:int (OrthoRouter.repairAll(g))
-        return g
     }
 
     ; Which side each line leaves by. The schema reader picks a column's left
@@ -607,7 +683,7 @@ class MermaidErFlow {
         def k:int 0
         while (k < (g.edgeCount())) {
             def e:FlowEdge (g.edgeAt(k))
-            if (e.sourceIndex >= 0) {
+            if ((e.sourceIndex >= 0) && (e.sourceIndex != e.targetIndex)) {
                 if (e.targetIndex >= 0) {
                     def a:FlowNode (g.nodeAt(e.sourceIndex))
                     def b:FlowNode (g.nodeAt(e.targetIndex))
@@ -636,5 +712,184 @@ class MermaidErFlow {
             }
             k = (k + 1)
         }
+    }
+
+    ; How far apart the line ends on one side of a box are kept: half a
+    ; name's height and a little, so that a name centred on its line clears
+    ; the line next to it. Never under `EdgeLanes.fanGap` (16).
+    sfn endGap:double (style:FlowStyle) {
+        def g:double (((MermaidErFlow.labelHeight(style)) * 0.5) + 4.0)
+        if (g < 16.0) {
+            return 16.0
+        }
+        return g
+    }
+
+    ; Every box long enough along each side for the line ends on it to sit
+    ; `gap` apart inside the share of the side a fan may use
+    ; (`EdgeLanes.sideShare`), with a gap to spare. True when one grew.
+    sfn growForEnds:boolean (g:FlowGraph gap:double) {
+        def grew:boolean false
+        def i:int 0
+        while (i < (g.nodeCount())) {
+            def n:FlowNode (g.nodeAt(i))
+            def side:int 0
+            while (side < 4) {
+                def c:int (EdgeFacing.endsOn(g i side false))
+                def need:double 0.0
+                if (c > 1) {
+                    ; whole units: a saved document keeps sizes to two
+                    ; decimals, and a size it cannot keep exactly would
+                    ; draw the reopened diagram a fraction differently
+                    need = (to_double (ceil ((((to_double (c - 1)) * gap) / (EdgeLanes.sideShare(n.shape))) + gap)))
+                }
+                if ((side == 1) || (side == 3)) {
+                    if (need > (n.height + 0.5)) {
+                        ; the floor the box's height is worked out against
+                        ; (`layoutCompartments`), so a document reopened
+                        ; keeps it
+                        n.minHeight = need
+                        n.height = need
+                        grew = true
+                    }
+                } {
+                    if (need > (n.width + 0.5)) {
+                        n.width = need
+                        grew = true
+                    }
+                }
+                side = (side + 1)
+            }
+            i = (i + 1)
+        }
+        return grew
+    }
+
+    ; The longest relationship name, as wide as the look will set it: the
+    ; label size (11 units, `textFill` times more on a slide) at about 0.6
+    ; of the size per character, and the pill's padding.
+    sfn labelWidth:double (g:FlowGraph style:FlowStyle) {
+        def size:double (12.0 * (MermaidErFlow.fill(style)))
+        def most:int 0
+        def k:int 0
+        while (k < (g.edgeCount())) {
+            def e:FlowEdge (g.edgeAt(k))
+            def n:int (strlen e.label)
+            if (n > most) {
+                most = n
+            }
+            k = (k + 1)
+        }
+        if (most == 0) {
+            return 0.0
+        }
+        return (((to_double most) * (size * 0.6)) + (size * 1.2))
+    }
+
+    sfn labelHeight:double (style:FlowStyle) {
+        def size:double (12.0 * (MermaidErFlow.fill(style)))
+        return (size * 1.7)
+    }
+
+    sfn fill:double (style:FlowStyle) {
+        if (style.textFill > 1.0) {
+            return style.textFill
+        }
+        return 1.0
+    }
+
+    ; How wide the gaps between the columns (LR; rows for TB) must be: the
+    ; stubs out of both boxes, a track for every line that crosses the
+    ; gap, and a run beside the tracks as long as the longest name (LR) or
+    ; as tall as one (TB), so that each name has a stretch of its own line
+    ; that no other line crosses. Never less than `least`.
+    sfn corridorFor:double (g:FlowGraph dir:string least:double labelW:double labelH:double) {
+        def tb:boolean (dir == "TB")
+        def room:double labelW
+        if tb {
+            room = labelH
+        }
+        if (room <= 0.0) {
+            return least
+        }
+        ; the layers' extents along the flow, in order
+        def los:[double]
+        def his:[double]
+        def i:int 0
+        while (i < (g.nodeCount())) {
+            def n:FlowNode (g.nodeAt(i))
+            def lo:double n.x
+            def hi:double (n.x + n.width)
+            if tb {
+                lo = n.y
+                hi = (n.y + n.height)
+            }
+            def found:boolean false
+            def j:int 0
+            while (j < (array_length los)) {
+                if ((lo < (itemAt his j)) && (hi > (itemAt los j))) {
+                    if (lo < (itemAt los j)) {
+                        set_at los j lo
+                    }
+                    if (hi > (itemAt his j)) {
+                        set_at his j hi
+                    }
+                    found = true
+                }
+                j = (j + 1)
+            }
+            if (found == false) {
+                push los lo
+                push his hi
+            }
+            i = (i + 1)
+        }
+        def best:double least
+        def a:int 0
+        while (a < (array_length los)) {
+            ; the nearest layer after this one
+            def nextLo:double 1000000000.0
+            def b:int 0
+            while (b < (array_length los)) {
+                if (((itemAt los b) >= (itemAt his a)) && ((itemAt los b) < nextLo)) {
+                    nextLo = (itemAt los b)
+                }
+                b = (b + 1)
+            }
+            if (nextLo < 999999999.0) {
+                def g0:double (itemAt his a)
+                def crossing:int 0
+                def k:int 0
+                while (k < (g.edgeCount())) {
+                    def e:FlowEdge (g.edgeAt(k))
+                    if ((e.sourceIndex >= 0) && ((e.targetIndex >= 0) && (e.sourceIndex != e.targetIndex))) {
+                        def s:FlowNode (g.nodeAt(e.sourceIndex))
+                        def t:FlowNode (g.nodeAt(e.targetIndex))
+                        def sc:double (s.centerX())
+                        def tc:double (t.centerX())
+                        if tb {
+                            sc = (s.centerY())
+                            tc = (t.centerY())
+                        }
+                        def mn:double sc
+                        def mx:double tc
+                        if (tc < sc) {
+                            mn = tc
+                            mx = sc
+                        }
+                        if ((mn < g0) && (mx > nextLo)) {
+                            crossing = (crossing + 1)
+                        }
+                    }
+                    k = (k + 1)
+                }
+                def need:double (to_double (ceil ((40.0 + ((to_double crossing) * 14.0)) + (room + 16.0))))
+                if (need > best) {
+                    best = need
+                }
+            }
+            a = (a + 1)
+        }
+        return best
     }
 }
