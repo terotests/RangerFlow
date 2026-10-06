@@ -111,7 +111,7 @@ class FlowWrapTest {
         def e:int 0
         while (e < (g.edgeCount())) {
             def ed:FlowEdge (g.edgeAt(e))
-            if (((array_length ed.waypoints) >= 4) && (ed.sourceHandle >= 0)) {
+            if ((((array_length ed.waypoints) >= 4) && (ed.sourceHandle >= 0)) || ed.hasLaneX) {
                 routed = (routed + 1)
             }
             e = (e + 1)
@@ -205,9 +205,31 @@ class FlowWrapTest {
         }
     }
 
+    ; A decision whose one branch goes through a box and whose other skips
+    ; it, twice, cut into columns: each skip keeps the lane the layout gave
+    ; it beside the box it skips. Routed again from end to end, it went
+    ; straight through that box, and the two lines crossed over it.
+    fn skipsKeepTheirLanes:void () {
+        def text:string ("flowchart TD\n  A([Kahvila]) --> B{Jono?}\n  B -->|lyhyt| D[Tilaa]\n  B -->|pitkä| C[Odota]\n  C --> D\n"
+            + "  D --> E{Pulla?}\n  E -->|kyllä| F[Korvapuusti]\n  E -->|ei| H((Nauti))\n  F --> H\n")
+        def g:FlowGraph (FlowWrapTest.graphOf(text))
+        this.ok(((EdgeOverlap.nodeCrossings(g)) == 0) "laid out, no line goes through a box")
+        def wrap (new FlowWrap())
+        this.ok((wrap.apply(g 1.9 6)) "the chart is wrapped")
+        this.ok((wrap.columns >= 2) ("into columns: " + (to_string wrap.columns)))
+        this.ok(((EdgeOverlap.nodeCrossings(g)) == 0) ("wrapped, no line goes through a box: " + (to_string (EdgeOverlap.nodeCrossings(g)))))
+        ; the fork stands over the middle of its two ways on
+        def b:FlowNode (g.nodeById("B"))
+        def c:FlowNode (g.nodeById("C"))
+        def d:FlowNode (g.nodeById("D"))
+        this.ok(((fabs ((b.centerX()) - (d.centerX()))) < 8.0) "the decision and the box both its ways reach line up")
+        this.ok(((c.centerX()) < ((b.centerX()) - 8.0)) "the box one way passes stands to one side")
+    }
+
     sfn main:void () {
         def t (new FlowWrapTest())
         t.run()
+        t.skipsKeepTheirLanes()
         print ((to_string t.passes) + " passed, " + (to_string t.fails) + " failed")
     }
 }
