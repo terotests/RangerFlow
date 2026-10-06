@@ -128,11 +128,28 @@ class FlowLook {
     def accent:string "#e8a92e"
     def bounce:boolean false
 
+    ; A CHART in the look (Sliqtly draws the slide's charts with it too): the
+    ; series' fills and outlines, cycled; a bar's corner and outline width;
+    ; the face its words are written in, and the face of its titles. "" =
+    ; the node palette / the box's outline / the label face.
+    def chartFills:[string]
+    def chartStrokes:[string]
+    def chartStrokeWidth:double 0.0
+    def chartRadius:double 0.0
+    def chartFont:string ""
+    def chartTitleFont:string ""
+    def chartTitleBold:boolean false
+    def chartTitleItalic:boolean false
+
     Constructor () {
         def p:[string]
         palette = p
         def s:[string]
         paletteStroke = s
+        def cf:[string]
+        chartFills = cf
+        def cs:[string]
+        chartStrokes = cs
     }
 
     sfn names:string () {
@@ -201,6 +218,15 @@ class FlowLook {
         k.round = (FlowLookPart.of("keep" "" "" 1.8))
         k.decision = (FlowLookPart.of("keep" "" "" 1.8))
         k.start = (FlowLookPart.of("keep" "" "" 1.8))
+        ; charts: the pastel cards with their outlines, which on white are
+        ; a shade deeper than a card's so a bar stands out from the ground
+        k.chartFills = k.palette
+        k.chartStrokes = k.paletteStroke
+        if light {
+            k.chartStrokes = ([] _:string ("#b455d0" "#2f8f78" "#2a86a0" "#c46a1f" "#977a12" "#c0476f"))
+        }
+        k.chartStrokeWidth = 1.8
+        k.chartRadius = 3.0
         return k
     }
 
@@ -246,6 +272,19 @@ class FlowLook {
         k.round.face("Josefin Sans" true false true)
         k.decision.face("Josefin Sans" true false true)
         k.start.face("Josefin Sans" true false true)
+        ; charts: the poster's ochre, its black (light on a dark ground),
+        ; grey and two earth tones, framed in the line colour
+        if light {
+            k.chartFills = ([] _:string (ochre "#111111" "#8a8a8a" "#a3471f" "#5f6b2f"))
+        } {
+            k.chartFills = ([] _:string (ochre "#efe7d6" "#9a9a9a" "#d0703f" "#a3b25e"))
+        }
+        k.chartStrokes = ([] _:string (k.edgeColor))
+        k.chartStrokeWidth = 1.6
+        k.chartRadius = 2.0
+        k.chartFont = "Josefin Sans-Bold"
+        k.chartTitleFont = "Josefin Sans"
+        k.chartTitleBold = true
         return k
     }
 
@@ -295,6 +334,13 @@ class FlowLook {
         k.round.face("Gloria Hallelujah" false false true)
         k.decision.face("Gloria Hallelujah" false false true)
         k.start.face("Gloria Hallelujah" false false true)
+        ; charts: the saturated palette in a fat outline
+        k.chartFills = k.palette
+        k.chartStrokes = ([] _:string (k.edgeColor))
+        k.chartStrokeWidth = 3.0
+        k.chartRadius = 10.0
+        k.chartFont = "Gloria Hallelujah"
+        k.chartTitleFont = "Gloria Hallelujah"
         return k
     }
 
@@ -336,6 +382,19 @@ class FlowLook {
         k.start.face("Fjalla One" false false true)
         k.decision.face("Fjalla One" false false true)
         k.round.face("Droid Serif" true true false)
+        ; charts: terracotta, the caption black (cream on a dark ground),
+        ; sand, dusty rose and sage, flat and square
+        if light {
+            k.chartFills = ([] _:string (terra "#211d1b" "#b08a4e" "#a8645a" "#6f7d5c"))
+        } {
+            k.chartFills = ([] _:string (terra "#f3ecdd" "#d9b98c" "#d39a8c" "#a9b896"))
+        }
+        k.chartStrokeWidth = 0.0
+        k.chartRadius = 0.0
+        k.chartFont = "Fjalla One"
+        k.chartTitleFont = "Droid Serif"
+        k.chartTitleBold = true
+        k.chartTitleItalic = true
         return k
     }
 
@@ -394,6 +453,70 @@ class FlowLook {
         return (FlowLook.textOn((this.fillOf(kind order))))
     }
 
+    ; A chart's series `i`: its fill, its outline ("" = none) and the
+    ; outline's width.
+    fn seriesFill:string (i:int) {
+        def list:[string] chartFills
+        if ((array_length list) == 0) {
+            list = palette
+        }
+        def n:int (array_length list)
+        if (n == 0) {
+            return (this.fillOf("box" i))
+        }
+        def o:int i
+        if (o < 0) {
+            o = 0
+        }
+        return (itemAt list (o - ((idiv o n) * n)))
+    }
+
+    fn seriesStroke:string (i:int) {
+        if (chartStrokeWidth <= 0.0) {
+            return ""
+        }
+        def n:int (array_length chartStrokes)
+        if (n == 0) {
+            return box.stroke
+        }
+        def o:int i
+        if (o < 0) {
+            o = 0
+        }
+        return (itemAt chartStrokes (o - ((idiv o n) * n)))
+    }
+
+    ; A series drawn as a LINE (or a point) on `ground`: its fill when that
+    ; stands out from the ground, else its outline (a mermaid pastel on
+    ; white is a card's fill, not a line's colour).
+    fn seriesInk:string (i:int ground:string) {
+        def fill:string (this.seriesFill(i))
+        def stroke:string (this.seriesStroke(i))
+        if ((strlen stroke) == 0) {
+            return fill
+        }
+        if ((FlowLook.contrast(ground fill)) >= 3.0) {
+            return fill
+        }
+        if ((FlowLook.contrast(ground stroke)) > (FlowLook.contrast(ground fill))) {
+            return stroke
+        }
+        return fill
+    }
+
+    ; The face a chart's words are written in, and its titles' ("" = the
+    ; host's own), named as the EVG font table names a face.
+    fn chartFace:string () {
+        return chartFont
+    }
+
+    fn chartTitleFace:string () {
+        if ((strlen chartTitleFont) == 0) {
+            return ""
+        }
+        return (FlowLook.faceName(chartTitleFont chartTitleBold chartTitleItalic))
+    }
+
     ; The shadow's colour for a fill ("" = no shadow).
     fn shadowOf:string (fill:string) {
         if (shadow == "darker") {
@@ -408,6 +531,12 @@ class FlowLook {
     fn faces:[string] () {
         def out:[string]
         def all:[string] ([] _:string ((FlowLook.faceName(box.font box.bold box.italic)) (FlowLook.faceName(round.font round.bold round.italic)) (FlowLook.faceName(decision.font decision.bold decision.italic)) (FlowLook.faceName(start.font start.bold start.italic)) (FlowLook.faceName(labelFont labelBold labelItalic))))
+        if ((strlen chartFont) > 0) {
+            push all chartFont
+        }
+        if ((strlen chartTitleFont) > 0) {
+            push all (this.chartTitleFace())
+        }
         def i:int 0
         while (i < (array_length all)) {
             def f:string (itemAt all i)
