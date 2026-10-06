@@ -454,7 +454,18 @@ class FlowWrap {
         def e:int 0
         while (e < (g.edgeCount())) {
             def ed:FlowEdge (g.edgeAt(e))
+            ; the layout's own route, before it is cleared
+            def laid:[double]
+            def w:int 0
+            while (w < (array_length ed.waypoints)) {
+                push laid (itemAt ed.waypoints w)
+                w = (w + 1)
+            }
             clear ed.waypoints
+            ; …and the straight lane it was slid onto, clear of the boxes
+            ; between its ends
+            def laneOn:boolean ed.hasLaneX
+            def laneAt:double ed.laneX
             ; the layout placed the label against the old route
             ed.labelDX = 0.0
             ed.labelDY = 0.0
@@ -471,6 +482,27 @@ class FlowWrap {
                 def acy:double (a.y + (a.height * 0.5))
                 def bcx:double (b.x + (b.width * 0.5))
                 def bcy:double (b.y + (b.height * 0.5))
+                if ((ca == cb) && ((array_length laid) >= 4)) {
+                    ; A route the layout drew, within one column: a long
+                    ; edge's lane past the boxes between its ends, a way
+                    ; back up beside the column. Its rows moved together,
+                    ; so it is the same route, moved with them. Drawn
+                    ; straight from end to end instead, a skip past the
+                    ; next box went through that box.
+                    def colX:double ((to_double ca) * colW)
+                    def q:int 0
+                    while ((q + 1) < (array_length laid)) {
+                        push ed.waypoints ((itemAt laid q) + colX)
+                        push ed.waypoints (this.movedY((itemAt laid (q + 1))))
+                        q = (q + 2)
+                    }
+                } {
+                if ((ca == cb) && laneOn) {
+                    ; a straight run down its own lane: the same lane,
+                    ; moved over with the column
+                    ed.laneX = (laneAt + ((to_double ca) * colW))
+                    ed.hasLaneX = true
+                } {
                 if ((ca == cb) && ((b.y - (a.y + a.height)) > 1.0)) {
                     ; down, same column
                     def mid:double (((a.y + a.height) + b.y) * 0.5)
@@ -502,9 +534,47 @@ class FlowWrap {
                         }
                     }
                 }
+                }
+                }
             }
             e = (e + 1)
         }
+    }
+
+    ; Where a point at height `y` of the layout went when its rows were
+    ; moved into their column: a point on a row moves with the row, one in
+    ; the gap between two rows keeps its place in that gap, which is now
+    ; `rowGap` tall. Only for points of a route inside one column — the
+    ; rows a route there passes are all in it, because a column ends only
+    ; where nothing but one link crosses.
+    fn movedY:double (y:double) {
+        if (rows == 0) {
+            return y
+        }
+        def r:int 0
+        while (r < rows) {
+            def top:double (itemAt rTop r)
+            def bot:double (itemAt rBot r)
+            def dy:double ((gY0 + (itemAt yOfRow r)) - top)
+            if (y <= bot) {
+                if ((y >= top) || (r == 0)) {
+                    return (y + dy)
+                }
+                ; in the gap above row r, below row r - 1
+                def pBot:double (itemAt rBot (r - 1))
+                def pDy:double ((gY0 + (itemAt yOfRow (r - 1))) - (itemAt rTop (r - 1)))
+                if (((itemAt colOfRow (r - 1)) != (itemAt colOfRow r)) || ((top - pBot) <= 0.0)) {
+                    return (y + dy)
+                }
+                def f:double ((y - pBot) / (top - pBot))
+                def from:double (pBot + pDy)
+                def to:double (top + dy)
+                return (from + ((to - from) * f))
+            }
+            r = (r + 1)
+        }
+        def last:int (rows - 1)
+        return (y + ((gY0 + (itemAt yOfRow last)) - (itemAt rTop last)))
     }
 
     sfn route:void (ed:FlowEdge pts:[double] fromSide:int toSide:int) {

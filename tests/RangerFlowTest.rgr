@@ -1744,8 +1744,9 @@ class RangerFlowTest {
         c.ok("the return sits below the step it comes from" (nc.y > (nb.y + nb.height)))
         c.ok(("and to its left, so the path up does not cross it (C.cx=" + ((to_string (nc.centerX())) + " B.cx=" + (to_string (nb.centerX())) + ")")) ((nc.centerX()) < (nb.centerX())))
 
-        ; A forward long edge is still a passer-by: the chain hangs straight
-        ; and the dummy stays on the right of the nodes it passes.
+        ; A forward long edge is one of its node's own ways on: the fork
+        ; into B and the skip past it leave A one to each side, and A and C
+        ; stand over the middle of the two, so the picture is symmetric.
         def chain (new FlowGraph)
         def ca:FlowNode (chain.node("A" "A" 0.0 0.0))
         def cb:FlowNode (chain.node("B" "B" 0.0 0.0))
@@ -1763,7 +1764,8 @@ class RangerFlowTest {
         l4.direction = "TB"
         l4.balance = true
         l4.run()
-        c.ok("a forward long edge leaves the chain hanging straight" ((fabs ((cc.centerX()) - (cb.centerX()))) < 8.0))
+        c.ok("a fork and the skip past it: the two ends line up" ((fabs ((cc.centerX()) - (ca.centerX()))) < 8.0))
+        c.ok(("the box skipped stands to one side of them (B.cx=" + ((to_string (cb.centerX())) + " A.cx=" + (to_string (ca.centerX())) + ")")) ((cb.centerX()) < ((ca.centerX()) - 8.0)))
     }
 
     ; ---------------------------------------------------------- edge lanes --

@@ -1920,11 +1920,11 @@ class LayeredLayout {
     ; adjacent violators solves exactly. A dummy weighs more than a node:
     ; the long edge it stands for is straight when its dummies line up, and
     ; a straight long edge is worth a node standing a little off centre. A
-    ; node with a node next door on that side wants to stand by IT and
-    ; ignores the long edges merely passing through: under its parent, not
-    ; halfway between its parent and a line from somewhere else on its way
-    ; to somewhere else — so a chain of nodes hangs straight down from
-    ; where it starts. A reversed long edge is that node's own return path,
+    ; node wants the middle of everything it is joined to on that side,
+    ; its own long edges included: a decision with one way into a box and
+    ; another past it stands over the two, and they leave it one to each
+    ; side — a symmetric fork rather than one line straight down and the
+    ; other bent round the box it skips. A reversed long edge is that node's own return path,
     ; not a passer-by, so the node stands toward it. A vertex with nothing
     ; on that side wants to stay where it is, lightly.
     fn balanceLayers:void () {
@@ -2078,11 +2078,13 @@ class LayeredLayout {
             }
             def isDummy:boolean ((itemAt vNode v) < 0)
             ; The end of a long edge: a dummy next to the node its edge
-            ; leaves or arrives at. Anywhere over that node — or within a
-            ; gap of it, since the line turns into the box in any case — is
-            ; as good as its middle, and asking for the middle of a wide
-            ; box that another wide box already stands under would drag
-            ; the two boxes apart instead.
+            ; leaves or arrives at. It asks for that node's middle, as the
+            ; box next door does, so the two share the room under the node
+            ; evenly — one to each side — and the node, counting both,
+            ; stands over the middle of them. With slack instead (anywhere
+            ; over the node would do) the box took the middle and the lane
+            ; was left hanging off one side. Groups keep their slack: a
+            ; line may land anywhere on a frame (`edgeLooseSource`).
             def endOfEdge:boolean false
             def offsets:boolean ((array_length edgeOffsetSource) > 0)
             while (at >= 0) {
@@ -2118,6 +2120,9 @@ class LayeredLayout {
                                         reach = nodeGap
                                     }
                                 }
+                                if (offsets == false) {
+                                    reach = 0.0
+                                }
                                 if (here < (attach - reach)) { here = (attach - reach) }
                                 if (here > (attach + reach)) { here = (attach + reach) }
                                 oc = here
@@ -2130,6 +2135,11 @@ class LayeredLayout {
                                 if ((this.looseEnd(other via)) == false) {
                                     reach2 = nodeGap
                                 }
+                            }
+                            ; a way back keeps its slack: it is the
+                            ; loop's return, not one of two ways on
+                            if ((offsets == false) && ((this.reversedDummy(v)) == false)) {
+                                reach2 = 0.0
                             }
                             if (here2 < (attach - reach2)) { here2 = (attach - reach2) }
                             if (here2 > (attach + reach2)) { here2 = (attach + reach2) }
@@ -2144,6 +2154,17 @@ class LayeredLayout {
                 } {
                     if (isDummy == false) {
                         oc = (oc - mine)
+                        ; A long edge of this node's own, forwards: one of
+                        ; its ways out (or in) as much as a box next door
+                        ; is. Counted with them, a fork into a box and a
+                        ; skip past that box stands over the middle of the
+                        ; two, and the two lines leave it symmetrically,
+                        ; one to each side, rather than one straight down
+                        ; and the other bent round the box it skips.
+                        if (this.reversedDummy(other) == false) {
+                            realTotal = (realTotal + oc)
+                            realN = (realN + 1)
+                        }
                         ; A return path ends here: count it with the real
                         ; neighbours so the node sits on that side rather
                         ; than on the parent and leaving the path to go

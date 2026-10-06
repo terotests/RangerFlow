@@ -485,13 +485,23 @@ class EdgeLanes {
             return false
         }
         def cur:double (g.endpointX(e true))
+        def far:double (g.endpointX(e false))
         if (vertical == false) {
             cur = (g.endpointY(e true))
+            far = (g.endpointY(e false))
         }
         ; Already in a comfortable open lane: leave it. A line that was
         ; already straight stays straight. Only a run hugging a neighbour
-        ; is worth sliding further away.
-        if (this.laneOpen(g e vertical cur a0 a1)) {
+        ; is worth sliding further away. A line whose ends are NOT level —
+        ; a fork into a box that stands to one side of the box it leaves —
+        ; is not in any lane yet, and is drawn straight if one is free; so
+        ; is a long edge routed round its dummies' lanes with a jog in it
+        ; where one straight run would have been clear.
+        def level:boolean ((fabs (far - cur)) < 0.5)
+        if ((array_length e.waypoints) > 0) {
+            level = false
+        }
+        if (level && (this.laneOpen(g e vertical cur a0 a1))) {
             if ((this.sideBusy(g e idx vertical cur)) == false) {
                 def curClear:double (this.laneClearance(g e vertical cur a0 a1))
                 if (curClear >= 16.0) {
