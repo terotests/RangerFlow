@@ -24,6 +24,63 @@ class FlowLookTest {
         this.corners()
         this.colours()
         this.faces()
+        this.charts()
+    }
+
+    ; A chart in each look: every series stands out from the ground (its fill
+    ; or its outline, 3:1 as a graphic must), the words read on the ground,
+    ; and the series cycle.
+    fn charts:void () {
+        def all:[string] (strsplit (FlowLook.names()) " ")
+        def i:int 0
+        while (i < (array_length all)) {
+            def g:int 0
+            while (g < 2) {
+                def light:boolean (g == 0)
+                def k:FlowLook (FlowLook.named((itemAt all i) light))
+                def tag:string (k.name + " " + (FlowLookTest.ground(light)))
+                def ground:string "#ffffff"
+                if (light == false) {
+                    ground = "#0b1030"
+                }
+                def o:int 0
+                while (o < 6) {
+                    def fill:string (k.seriesFill(o))
+                    def stroke:string (k.seriesStroke(o))
+                    def c:double (FlowLook.contrast(ground fill))
+                    if ((strlen stroke) > 0) {
+                        def sc:double (FlowLook.contrast(ground stroke))
+                        if (sc > c) {
+                            c = sc
+                        }
+                    }
+                    this.ok((c >= 3.0) (tag + " series " + (to_string o) + ": " + fill + "/" + stroke + " on the ground is " + (to_string c)))
+                    o = (o + 1)
+                }
+                this.ok(((FlowLook.contrast(ground k.labelText)) >= 4.5) (tag + ": the chart's words read on the ground"))
+                def li:int 0
+                while (li < 6) {
+                    def ink:string (k.seriesInk(li ground))
+                    this.ok(((FlowLook.contrast(ground ink)) >= 3.0) (tag + " series " + (to_string li) + " as a line: " + ink))
+                    li = (li + 1)
+                }
+                def n:int (array_length k.chartFills)
+                this.ok((n >= 4) (tag + ": at least four series colours"))
+                this.ok(((k.seriesFill(n)) == (k.seriesFill(0))) (tag + ": the series cycle"))
+                this.ok(((k.seriesFill(1)) != (k.seriesFill(0))) (tag + ": two series, two colours"))
+                g = (g + 1)
+            }
+            i = (i + 1)
+        }
+        def rom:FlowLook (FlowLook.romantic(true))
+        this.ok(((rom.seriesStroke(0)) == "") "romantic bars have no outline")
+        this.ok(((rom.chartTitleFace()) == "Droid Serif-BoldItalic") "romantic titles in the italic serif")
+        def toon:FlowLook (FlowLook.cartoon(true))
+        this.ok(((toon.seriesStroke(2)) == toon.edgeColor) "cartoon bars in the fat ink outline")
+        def mer:FlowLook (FlowLook.mermaid(false))
+        this.ok(((mer.seriesStroke(1)) == (mer.strokeOf("box" 1))) "mermaid bars outlined like its cards (dark ground)")
+        def jur:FlowLook (FlowLook.jurassic(true))
+        this.ok(((join (jur.faces()) ",") == "Josefin Sans-Bold") ("jurassic's chart words need no other face: " + (join (jur.faces()) ",")))
     }
 
     fn names:void () {

@@ -166,6 +166,10 @@ class SceneItem {
     ; it a pixel short and the label wraps, which turns "markdown" into
     ; "markdo" with the rest on a line nobody sees.
     def nowrap:boolean false
+    ; The whole text when `text` was cut to fit (a chart's axis title too long
+    ; even on two lines): a host shows it on hover, and the EVG element carries
+    ; it as its `alt`, the words a reader is owed.
+    def full:string ""
 
     ; path
     def pts:[double]
@@ -675,6 +679,9 @@ class FlowScene {
             t.textAlign = s.align
             if s.nowrap {
                 t.whiteSpace = "nowrap"
+            }
+            if ((strlen s.full) > 0) {
+                t.alt = s.full
             }
             if (s.angle != 0.0) {
                 t.applyTransform(("rotate(" + (EVGDisplayList.num(s.angle)) + "deg)"))
