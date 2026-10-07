@@ -180,6 +180,17 @@ class SceneItem {
     ; Exporters draw the fill either way; a painter with a look of its own
     ; (a slide's glass panels, a sketch) keeps this one colour.
     def own:boolean false
+    ; An edge's line: what is drawn at its end and at its start (`FlowEdge`
+    ; markerEnd / markerStart after the notation: "arrow", "arrowclosed",
+    ; "circle", "cross", …; "" for nothing), and its width over the look's
+    ; own line width (1: the look's; 2 for `==>`, `penwidth`, `linkStyle
+    ; stroke-width`; 0: not known). `own` on a line means the diagram chose
+    ; its colour (`FlowEdge.ownStroke`). A painter with a look of its own
+    ; draws the line its way and keeps these, the facts a line's kind
+    ; carries.
+    def head:string ""
+    def tail:string ""
+    def weight:double 0.0
 
     ; a tag the hit tester and the tests read: "node:<id>", "edge:<id>",
     ; "port:<id>", "chrome"

@@ -1117,6 +1117,10 @@ class FlowEdge {
     def hidden:boolean false
     def strokeColor:string ""
     def strokeWidth:double 0.0
+    ; The diagram itself chose `strokeColor` (a Mermaid `linkStyle`, a DOT
+    ; `color`), not the look: a painter with a look of its own keeps it, as
+    ; it keeps a node's `ownFill`.
+    def ownStroke:boolean false
     ; "" | "arrow" | "arrowclosed"
     def markerEnd:string "arrowclosed"
     def markerStart:string ""

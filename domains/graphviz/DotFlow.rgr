@@ -826,6 +826,9 @@ class DotFlow {
             }
             if ((strlen fill) > 0) {
                 n.bgColor = fill
+                ; the file's own colour: a painter with a look of its own
+                ; (a slide's) keeps it, as it keeps a Mermaid `classDef`'s
+                n.ownFill = true
             }
             if ((strlen line) > 0) {
                 n.borderColor = line
@@ -877,6 +880,7 @@ class DotFlow {
             def stroke:string (palette.resolve((de.attr("color"))))
             if ((strlen stroke) > 0) {
                 e.strokeColor = stroke
+                e.ownStroke = true
             }
             def pen:double (DotFlow.points((de.attr("penwidth"))))
             if (pen > 0.0) {

@@ -273,11 +273,48 @@ class FlowWrapTest {
         this.ok(((tall.applyFlow(g3 1.5 6)) && (tall.columns >= 2)) "a top-to-bottom chain still goes into columns")
     }
 
+    ; A loop back in the first row goes round the outside of it: under the
+    ; row runs the link to the next row, and a way back there lay on that
+    ; run, its name on the other's.
+    fn loopOutside:void () {
+        def text:string "flowchart LR\n  A[Idea] --> B{Hyvä?}\n  B -->|kyllä| C[Toteuta]\n  B -->|ei| A\n  C --> D([Julkaise])\n"
+        def g:FlowGraph (FlowWrapTest.graphOf(text))
+        def wrap (new FlowWrap())
+        this.ok((wrap.applyFlow(g 2.4 4)) "four steps with a loop are wrapped from four")
+        this.ok((wrap.columns == 2) ("into two rows: " + (to_string wrap.columns)))
+        def a:FlowNode (g.nodeById("A"))
+        def b:FlowNode (g.nodeById("B"))
+        def top:double a.y
+        if (b.y < top) { top = b.y }
+        def e:int 0
+        while (e < (g.edgeCount())) {
+            def ed:FlowEdge (g.edgeAt(e))
+            if ((ed.source == "B") && (ed.target == "A")) {
+                this.ok(((array_length ed.waypoints) >= 4) "the way back has a route")
+                ; the corners between its two ends
+                def q:int 3
+                def above:boolean true
+                while (q < ((array_length ed.waypoints) - 2)) {
+                    if ((itemAt ed.waypoints q) > (top + 0.5)) {
+                        above = false
+                    }
+                    q = (q + 2)
+                }
+                this.ok(above "…round the top of the first row, not through the gap the next row's link uses")
+                this.ok((((ed.sourceHandle == 0) && (ed.targetHandle == 0))) "…leaving and entering on the top")
+                this.ok((((ed.portNudgeSource == 0.0) && (ed.portNudgeTarget == 0.0))) "…at the middle of that side")
+            }
+            e = (e + 1)
+        }
+        this.ok(((EdgeOverlap.nodeCrossings(g)) == 0) ("no line goes through a box: " + (to_string (EdgeOverlap.nodeCrossings(g)))))
+    }
+
     sfn main:void () {
         def t (new FlowWrapTest())
         t.run()
         t.skipsKeepTheirLanes()
         t.rows()
+        t.loopOutside()
         print ((to_string t.passes) + " passed, " + (to_string t.fails) + " failed")
     }
 }

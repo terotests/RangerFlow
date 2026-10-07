@@ -1523,6 +1523,10 @@ class FlowView {
         if (e.dash > 0.0) {
             item.dash = (this.sl(e.dash))
         }
+        item.own = e.ownStroke
+        if ((e.strokeWidth > 0.0) && (theme.edgeWidth > 0.0)) {
+            item.weight = (e.strokeWidth / theme.edgeWidth)
+        }
         drawnEdges = (drawnEdges + 1)
         ; Ends. The angle comes from the flattened polyline rather than the
         ; handle's side, so a marker on a curve points where the curve goes.
@@ -1530,6 +1534,8 @@ class FlowView {
         def startAngle:double (path.angleAtStart())
         def markerEnd:string (this.markerName(e false))
         def markerStart:string (this.markerName(e true))
+        item.head = markerEnd
+        item.tail = markerStart
         def size:double (this.sl(theme.markerSize))
         def markerFloor:double (this.hair(4.0))
         if (size < markerFloor) { size = markerFloor }
