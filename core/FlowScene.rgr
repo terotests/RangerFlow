@@ -192,11 +192,22 @@ class SceneItem {
     def tail:string ""
     def weight:double 0.0
 
+    ; picture (kind 5): the name of the picture drawn in the box, as the
+    ; document wrote it (a chart's `image` mark: `media/logo.svg`). The host
+    ; that holds the pictures resolves it; the scene only places it.
+    def src:string ""
+
     ; a tag the hit tester and the tests read: "node:<id>", "edge:<id>",
     ; "port:<id>", "chrome"
     def tag:string ""
 
     Constructor () {
+    }
+
+    ; A mark on the page: a box, a text, a path or a picture. Clip pushes and
+    ; pops (3, 4) are instructions to a rasterizer.
+    fn drawable:boolean () {
+        return ((kind < 3) || (kind == 5))
     }
 }
 
@@ -242,7 +253,7 @@ class FlowScene {
         def i:int 0
         while (i < (array_length items)) {
             def s:SceneItem (itemAt items i)
-            if (s.kind < 3) {
+            if (s.drawable()) {
                 n = (n + 1)
             }
             i = (i + 1)
@@ -303,6 +314,20 @@ class FlowScene {
             i = (i + 1)
         }
         s.d = (FlowScene.polygonPath(s.pts true))
+        push items s
+        return s
+    }
+
+    ; A picture in the box (x, y, w, h), drawn to fill it: whoever resolves
+    ; `src` against its pictures keeps the picture's proportions inside it.
+    fn image:SceneItem (x:double y:double w:double h:double src:string) {
+        def s (new SceneItem)
+        s.kind = 5
+        s.x = x
+        s.y = y
+        s.w = w
+        s.h = h
+        s.src = src
         push items s
         return s
     }
@@ -530,6 +555,19 @@ class FlowScene {
             if (s.kind == 4) {
                 dl.addClipEnd()
             }
+            if (s.kind == 5) {
+                if ((strlen s.src) > 0) {
+                    def ci (new EVGDrawCmd)
+                    ci.kind = 2
+                    ci.x = s.x
+                    ci.y = s.y
+                    ci.w = s.w
+                    ci.h = s.h
+                    ci.src = s.src
+                    ci.a = s.opacity
+                    push dl.cmds ci
+                }
+            }
             i = (i + 1)
         }
     }
@@ -657,7 +695,7 @@ class FlowScene {
         while (i < (array_length items)) {
             def s:SceneItem (itemAt items i)
             def el:EVGElement (this.itemToElement(s))
-            if (s.kind < 3) {
+            if (s.drawable()) {
                 root.addChild(el)
             }
             i = (i + 1)
@@ -666,6 +704,23 @@ class FlowScene {
     }
 
     fn itemToElement:EVGElement (s:SceneItem) {
+        if (s.kind == 5) {
+            def img:EVGElement (EVGElement.createImg())
+            img.position = "absolute"
+            img.left = (EVGUnit.px((s.x - worldX)))
+            img.top = (EVGUnit.px((s.y - worldY)))
+            img.width = (EVGUnit.px(s.w))
+            img.height = (EVGUnit.px(s.h))
+            img.src = s.src
+            ; the name as the document wrote it, which stays when a host
+            ; resolves `src` to its own path for the picture
+            img.alt = s.src
+            img.objectFit = "contain"
+            if (s.opacity < 1.0) {
+                img.opacity = s.opacity
+            }
+            return img
+        }
         if (s.kind == 1) {
             ; `tagName == "text"` is what the PDF and HTML renderers switch on
             ; to paint a string; a div with textContent lays out and prints
@@ -836,6 +891,11 @@ class FlowScene {
                     }
                 }
                 out = (out + "/>\n")
+            }
+            if ((s.kind == 5) && ((strlen s.src) > 0)) {
+                out = (out + "<image x=\"" + (EVGDisplayList.num(s.x)) + "\" y=\"" + (EVGDisplayList.num(s.y)))
+                out = (out + "\" width=\"" + (EVGDisplayList.num(s.w)) + "\" height=\"" + (EVGDisplayList.num(s.h)) + "\"")
+                out = (out + " href=\"" + (FlowScene.xmlEscape(s.src)) + "\"/>\n")
             }
             i = (i + 1)
         }
