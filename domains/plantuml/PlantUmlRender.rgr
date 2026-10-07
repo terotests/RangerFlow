@@ -32,6 +32,7 @@ Import "PlantUmlActivityReader.rgr"
 Import "PlantUmlSequenceReader.rgr"
 Import "../../core/FlowView.rgr"
 Import "../../core/FlowStyleSheet.rgr"
+Import "../../layout/FlowWrap.rgr"
 
 ; What came back. `ok` false with a `kind` set means "recognised, and nothing
 ; here draws one yet" — a different answer from "that is not PlantUML", and
@@ -124,9 +125,23 @@ class PlantUmlRender {
     }
 
     sfn sceneStyled:FlowScene (text:string style:FlowStyle maxWidth:double padding:double) {
+        return (PlantUmlRender.sceneWrappedStyled(text style maxWidth padding 0.0))
+    }
+
+    ; The same, with a long top-to-bottom flow cut into columns so it fits a
+    ; space of `aspect` (width / height), as Mermaid's and DOT's are — see
+    ; `FlowWrap`. An aspect of 0, or a flow too short or with partitions,
+    ; is drawn as it was laid out.
+    sfn sceneWrappedStyled:FlowScene (text:string style:FlowStyle maxWidth:double padding:double aspect:double) {
         def drawing:PlantUmlDrawing (PlantUmlRender.draw(text style))
         if (! drawing.ok) {
             return (new FlowScene)
+        }
+        ; only an activity is a flow; a sequence or a class diagram is not cut
+        if ((aspect > 0.0) && (drawing.kind == "activity")) {
+            def wrap (new FlowWrap())
+            wrap.spacing = style.spacing
+            wrap.applyFlow(drawing.graph aspect style.wrapFrom)
         }
         def v:FlowView (FlowView.of(drawing.graph))
         v.notation = drawing.notation

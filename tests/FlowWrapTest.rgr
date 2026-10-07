@@ -4,6 +4,7 @@
 Import "../domains/mermaid/MermaidRender.rgr"
 Import "../layout/FlowWrap.rgr"
 Import "../domains/graphviz/DotRender.rgr"
+Import "../domains/plantuml/PlantUmlRender.rgr"
 
 class FlowWrapTest {
     def fails:int 0
@@ -309,12 +310,37 @@ class FlowWrapTest {
         this.ok(((EdgeOverlap.nodeCrossings(g)) == 0) ("no line goes through a box: " + (to_string (EdgeOverlap.nodeCrossings(g)))))
     }
 
+    ; A PlantUML activity is a top-to-bottom flow too: in a wide room it is
+    ; cut into columns, as Mermaid's and DOT's are (a nine-step flow was
+    ; drawn a strip 292 px wide on a 1704 px slide, its text 13 px).
+    fn plantUmlActivity:void () {
+        def text:string "@startuml\nstart\n:Vastaanota;\nif (Kelpaa?) then (kyllä)\n  :Tallenna;\n  fork\n    :Ilmoita;\n  fork again\n    :Indeksoi;\n  end fork\nelse (ei)\n  :Hylkää;\nendif\nstop\n@enduml\n"
+        def st:FlowStyle (FlowStyle.named("default"))
+        st.wrapFrom = 4
+        def whole:FlowScene (PlantUmlRender.sceneWrappedStyled(text st 0.0 8.0 0.0))
+        def cut:FlowScene (PlantUmlRender.sceneWrappedStyled(text st 0.0 8.0 2.4))
+        this.ok((whole.worldH > (whole.worldW * 1.5)) ("as written it is a tall strip: " + (to_string whole.worldW) + "x" + (to_string whole.worldH)))
+        def fitWhole:double (FlowWrapTest.mn((2.4 / whole.worldW) (1.0 / whole.worldH)))
+        def fitCut:double (FlowWrapTest.mn((2.4 / cut.worldW) (1.0 / cut.worldH)))
+        this.ok((fitCut > (fitWhole * 1.1)) ("cut into columns it draws larger in a 2.4 room: " + (to_string fitWhole) + " -> " + (to_string fitCut)))
+        def seq:string "@startuml\nAlice -> Bob: a\nBob -> Carol: b\nCarol -> Dan: c\nDan -> Eve: d\nEve -> Alice: e\n@enduml\n"
+        def s0:FlowScene (PlantUmlRender.sceneWrappedStyled(seq st 0.0 8.0 0.0))
+        def s1:FlowScene (PlantUmlRender.sceneWrappedStyled(seq st 0.0 8.0 2.4))
+        this.ok(((s0.worldW == s1.worldW) && (s0.worldH == s1.worldH)) "a sequence diagram is not cut")
+    }
+
+    sfn mn:double (a:double b:double) {
+        if (a < b) { return a }
+        return b
+    }
+
     sfn main:void () {
         def t (new FlowWrapTest())
         t.run()
         t.skipsKeepTheirLanes()
         t.rows()
         t.loopOutside()
+        t.plantUmlActivity()
         print ((to_string t.passes) + " passed, " + (to_string t.fails) + " failed")
     }
 }
