@@ -55,6 +55,9 @@ class FlowStyle {
     ; Box labels set in bold (`FlowTheme.nodeBold`), measured bold too so
     ; they still fit their boxes. On for a slide, like `textFill`.
     def labelBold:boolean false
+    ; How much larger the names on the lines may be set (`FlowView
+    ; .fillTextAnd`); 0 is as much as `textFill`.
+    def labelFill:double 0.0
     ; The gaps between boxes, layers and wrapped rows as a share of the
     ; layout's own (1 as they are). A slide's diagram is scaled to its room
     ; whole, so gaps given back are larger boxes and text there. Floors a
@@ -182,6 +185,14 @@ class FlowStyle {
     ; Written as a rule like any other, because "the paper is off-white in
     ; print and near-black on screen" is the same kind of decision as "a
     ; decision diamond is pale orange".
+    ; What `textFill` grows the names on the lines by, at most.
+    fn labelMost:double () {
+        if ((labelFill > 0.0) && (labelFill < textFill)) {
+            return labelFill
+        }
+        return textFill
+    }
+
     fn applyToTheme:int (t:FlowTheme) {
         if labelBold {
             t.nodeBold = true

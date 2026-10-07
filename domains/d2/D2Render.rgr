@@ -97,7 +97,7 @@ class D2Render {
         v.notation = drawing.notation
         style.applyToTheme(v.theme)
         if (style.textFill > 1.0) {
-            v.fillText(style.textFill)
+            v.fillTextAnd(style.textFill (style.labelMost()))
         }
         v.showBackground = false
         v.theme.background = "#ffffff"

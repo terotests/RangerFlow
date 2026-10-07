@@ -2207,10 +2207,24 @@ class FlowView {
     ; the same factor so a branch's "yes" stays in step with its boxes.
     ; Returns the factor used.
     fn fillText:double (most:double) {
+        return (this.fillTextAnd(most most))
+    }
+
+    ; The same, with the names on the lines grown at most `labelMost`: a
+    ; box has room round its label, a line's name sits in a gap the layout
+    ; measured for it, and grown past that it runs over the next line.
+    fn fillTextAnd:double (most:double labelMost:double) {
         def k:double (this.textRoom(most))
+        def lk:double k
+        if (lk > labelMost) {
+            lk = labelMost
+        }
+        if (lk < 1.0) {
+            lk = k
+        }
         theme.headerFontSize = (theme.headerFontSize * k)
-        theme.labelFontSize = (theme.labelFontSize * k)
-        labelGrow = k
+        theme.labelFontSize = (theme.labelFontSize * lk)
+        labelGrow = lk
         return k
     }
 

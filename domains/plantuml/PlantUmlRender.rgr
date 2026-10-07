@@ -132,7 +132,7 @@ class PlantUmlRender {
         v.notation = drawing.notation
         style.applyToTheme(v.theme)
         if (style.textFill > 1.0) {
-            v.fillText(style.textFill)
+            v.fillTextAnd(style.textFill (style.labelMost()))
         }
         ; No canvas — the editor's paper and its grid of dots are part of an
         ; EDITOR. Both halves are needed: `showBackground` stops the grid, and

@@ -7639,6 +7639,21 @@ class RangerFlowTest {
     ; ----------------------------------------------- what a slide asks of it --
     ; A dashed border and the author's own colours reach the scene, and a
     ; slide can ask for the labels to be as large as their boxes hold.
+    sfn largestEdgeText:double (sc:FlowScene) {
+        def most:double 0.0
+        def i:int 0
+        while (i < (array_length sc.items)) {
+            def it:SceneItem (itemAt sc.items i)
+            if ((it.kind == 1) && ((indexOf it.tag "edge:") == 0)) {
+                if (it.fontSize > most) {
+                    most = it.fontSize
+                }
+            }
+            i = (i + 1)
+        }
+        return most
+    }
+
     sfn largestText:double (sc:FlowScene tag:string) {
         def most:double 0.0
         def i:int 0
@@ -7775,6 +7790,17 @@ class RangerFlowTest {
         def large:double (RangerFlowTest.largestText(big "node:A"))
         c.ok(("a slide sets a short label larger, " + (to_string small) + " -> " + (to_string large)) (large > (small * 1.3)))
         c.ok("but no larger than asked" (large <= ((small * 1.8) + 0.01)))
+        ; Line names grow less than box labels when told so.
+        def lst:FlowStyle (FlowStyle.named("default"))
+        lst.textFill = 2.4
+        lst.labelFill = 1.2
+        def lsc:FlowScene (MermaidRender.sceneStyled("flowchart LR\n  A[Alku] -->|kyllä| B[Loppu]\n" lst 0.0 8.0))
+        def plain:FlowScene (MermaidRender.sceneStyled("flowchart LR\n  A[Alku] -->|kyllä| B[Loppu]\n" (FlowStyle.named("default")) 0.0 8.0))
+        def nameBig:double (RangerFlowTest.largestEdgeText(lsc))
+        def nameWas:double (RangerFlowTest.largestEdgeText(plain))
+        def boxBig:double (RangerFlowTest.largestText(lsc "node:A"))
+        def boxWas:double (RangerFlowTest.largestText(plain "node:A"))
+        c.ok(("labelFill caps a line's name: " + (to_string nameWas) + " -> " + (to_string nameBig) + ", box " + (to_string boxWas) + " -> " + (to_string boxBig)) (((nameBig <= ((nameWas * 1.2) + 0.01)) && (boxBig > (boxWas * 1.3))) && (nameBig > 0.0)))
         ; Spacing: the gaps given back, the boxes as they were.
         def chain:string "flowchart LR\n  A[Liidi] --> B[Ensikauppa] --> C[Onboarding] --> D[Asiakas]\n"
         def wide:FlowScene (MermaidRender.sceneStyled(chain (FlowStyle.named("default")) 0.0 8.0))
