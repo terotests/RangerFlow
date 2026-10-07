@@ -21,7 +21,8 @@
 ; This is the classic four-phase pipeline, in its honest small form:
 ;
 ;   1. break cycles          a DFS; back edges are reversed for layout only
-;   2. assign layers         longest path from a source
+;   2. assign layers         longest path from a source, a group of shared
+;                            rank (`sameRank`) standing as one node
 ;   3. order within layers   barycentre sweeps, which is the crossing reduction,
 ;                            counted and kept at its best, then transpose and
 ;                            sifting, with restarts while crossings are left —
@@ -178,6 +179,22 @@ class LayeredLayout {
     ; to reach the middle.
     def edgeLooseSource:[boolean]
     def edgeLooseTarget:[boolean]
+    ; Nodes the author put on one rank, the way DOT's `{ rank=same; a; b }`
+    ; says (see `sameRank`): per node index, the group it belongs to or -1,
+    ; and per group what kind of group it is — 0 same, 1 min, 2 source,
+    ; 3 max, 4 sink. Empty when nobody asked, which is every chart but a DOT
+    ; one, and then none of what follows changes anything.
+    def rankGroup:[int]
+    def rankKind:[int]
+    ; Per node, the member of its group that stands for the whole group
+    ; while cycles are broken: a group is one node to the ranking.
+    def rankRep:[int]
+    ; The edges between two members of one group — FLAT edges, drawn side to
+    ; side within the layer instead of down to the next one — by the vertex
+    ; at each end (a node's vertex is its own index) and by edge index.
+    def flatFrom:[int]
+    def flatTo:[int]
+    def flatEdge:[int]
 
     ; the vertices of each layer: layerVerts[layerStart[l] …]
     def layerStart:[int]
@@ -231,6 +248,7 @@ class LayeredLayout {
     fn run:void () {
         graph.reindex()
         graph.flow = direction
+        this.settleRanks()
         this.buildAdjacency()
         this.assignLayers()
         this.buildVertices()
@@ -389,6 +407,217 @@ class LayeredLayout {
         return longest
     }
 
+    ; ------------------------------------------------------- shared ranks --
+    ; Graphviz's `rank` subgraphs, as a constraint on the layering rather
+    ; than a nudge afterwards: `same` puts the members on one layer — the
+    ; deepest any of them would have had — `min` and `source` on the first,
+    ; `max` and `sink` on the last (`source` and `sink` alone there). An edge
+    ; between two members is a flat edge: it runs along the layer, does not
+    ; push its target down, and the ordering keeps its source before its
+    ; target. A node named in two groups joins them into one, which is what
+    ; sharing a rank with both means. Call before `run`, with node indices.
+    fn sameRank:void (members:[int] kind:string) {
+        def n:int (graph.nodeCount())
+        while ((array_length rankGroup) < n) {
+            push rankGroup -1
+        }
+        def code:int 0
+        if (kind == "min") { code = 1 }
+        if (kind == "source") { code = 2 }
+        if (kind == "max") { code = 3 }
+        if (kind == "sink") { code = 4 }
+        def g:int (array_length rankKind)
+        push rankKind code
+        def i:int 0
+        while (i < (array_length members)) {
+            def v:int (itemAt members i)
+            i = (i + 1)
+            if ((v < 0) || (v >= n)) {
+                continue
+            }
+            def had:int (itemAt rankGroup v)
+            if ((had >= 0) && (had != g)) {
+                ; Merge the older group into this one; a kind that pins the
+                ; group to an end of the drawing outlasts a plain `same`.
+                if (code == 0) {
+                    set_at rankKind g (itemAt rankKind had)
+                }
+                def w:int 0
+                while (w < n) {
+                    if ((itemAt rankGroup w) == had) {
+                        set_at rankGroup w g
+                    }
+                    w = (w + 1)
+                }
+            }
+            set_at rankGroup v g
+        }
+    }
+
+    ; Whether any rank was asked for — the switch the rest of this looks at.
+    fn ranked:boolean () {
+        return ((array_length rankKind) > 0)
+    }
+
+    fn groupOf:int (v:int) {
+        if ((v < 0) || (v >= (array_length rankGroup))) {
+            return -1
+        }
+        return (itemAt rankGroup v)
+    }
+
+    fn kindOf:int (v:int) {
+        def g:int (this.groupOf(v))
+        if (g < 0) {
+            return -1
+        }
+        return (itemAt rankKind g)
+    }
+
+    fn repOf:int (v:int) {
+        if ((v < 0) || (v >= (array_length rankRep))) {
+            return v
+        }
+        return (itemAt rankRep v)
+    }
+
+    ; Each group's stand-in is its first member by index; a node in no group
+    ; stands for itself, so without groups the ranking sees the graph as it is.
+    fn settleRanks:void () {
+        clear rankRep
+        def n:int (graph.nodeCount())
+        def i:int 0
+        while (i < n) {
+            push rankRep i
+            i = (i + 1)
+        }
+        if ((this.ranked()) == false) {
+            return
+        }
+        while ((array_length rankGroup) < n) {
+            push rankGroup -1
+        }
+        def v:int 0
+        while (v < n) {
+            def g:int (itemAt rankGroup v)
+            if (g >= 0) {
+                def w:int 0
+                while (w < v) {
+                    if ((itemAt rankGroup w) == g) {
+                        set_at rankRep v (itemAt rankRep w)
+                        w = v
+                    }
+                    w = (w + 1)
+                }
+            }
+            v = (v + 1)
+        }
+    }
+
+    ; An edge between two members of one group: it lies along the layer.
+    fn isFlat:boolean (k:int) {
+        def e:FlowEdge (graph.edgeAt(k))
+        if ((e.sourceIndex < 0) || (e.targetIndex < 0)) {
+            return false
+        }
+        if (e.sourceIndex == e.targetIndex) {
+            return false
+        }
+        def g:int (this.groupOf(e.sourceIndex))
+        if (g < 0) {
+            return false
+        }
+        return (g == (this.groupOf(e.targetIndex)))
+    }
+
+    ; An edge the ranking has to take backwards whatever the cycles say: one
+    ; arriving at a group pinned to the first layer, or leaving one pinned to
+    ; the last. Nothing may stand above the first layer or below the last.
+    fn pinnedBackwards:boolean (k:int) {
+        def e:FlowEdge (graph.edgeAt(k))
+        if ((e.sourceIndex < 0) || (e.targetIndex < 0)) {
+            return false
+        }
+        if (this.isFlat(k)) {
+            return false
+        }
+        def into:int (this.kindOf(e.targetIndex))
+        if ((into == 1) || (into == 2)) {
+            return true
+        }
+        def outOf:int (this.kindOf(e.sourceIndex))
+        if ((outOf == 3) || (outOf == 4)) {
+            return true
+        }
+        return false
+    }
+
+    ; Raise every member of a group to the group's deepest layer, a `max` or
+    ; `sink` group to the bottom of the drawing, and — when a `source` group
+    ; exists — everything outside it off the first layer. True when anything
+    ; moved. Like the relaxation it only raises, so the two run to a fixed
+    ; point together.
+    fn levelRanks:boolean () {
+        if ((this.ranked()) == false) {
+            return false
+        }
+        def n:int (graph.nodeCount())
+        def deepest:[int]
+        def hasSource:boolean false
+        def g0:int 0
+        while (g0 < (array_length rankKind)) {
+            push deepest -1
+            if ((itemAt rankKind g0) == 2) {
+                hasSource = true
+            }
+            g0 = (g0 + 1)
+        }
+        def bottom:int 0
+        def v:int 0
+        while (v < n) {
+            def lv:int (itemAt layerOf v)
+            def g:int (this.groupOf(v))
+            if (g >= 0) {
+                if (lv > (itemAt deepest g)) {
+                    set_at deepest g lv
+                }
+            }
+            def kind:int (this.kindOf(v))
+            if ((kind != 3) && (kind != 4)) {
+                if (lv > bottom) {
+                    bottom = lv
+                }
+            }
+            v = (v + 1)
+        }
+        def changed:boolean false
+        def u:int 0
+        while (u < n) {
+            def cur:int (itemAt layerOf u)
+            def want:int cur
+            def gu:int (this.groupOf(u))
+            def ku:int (this.kindOf(u))
+            if (gu >= 0) {
+                want = (itemAt deepest gu)
+            }
+            if ((ku == 3) && (want < bottom)) {
+                want = bottom
+            }
+            if ((ku == 4) && (want < (bottom + 1))) {
+                want = (bottom + 1)
+            }
+            if (hasSource && ((ku != 2) && (want < 1))) {
+                want = 1
+            }
+            if (want > cur) {
+                set_at layerOf u want
+                changed = true
+            }
+            u = (u + 1)
+        }
+        return changed
+    }
+
     ; A pair of intrusive linked lists rather than arrays of arrays: one
     ; allocation per edge instead of one per node, and it compiles the same on
     ; every target.
@@ -424,6 +653,10 @@ class LayeredLayout {
                         from = e.targetIndex
                         to = e.sourceIndex
                     }
+                    ; A flat edge says nothing about which layer is lower.
+                    if (this.isFlat(k)) {
+                        to = from
+                    }
                     if (from != to) {
                         push outTo to
                         push outNext (itemAt outHead from)
@@ -455,10 +688,21 @@ class LayeredLayout {
             push state 0
             j = (j + 1)
         }
+        ; An edge pinned backwards starts out reversed, and the search below
+        ; walks it the way it now points.
+        if (this.ranked()) {
+            def f:int 0
+            while (f < m) {
+                if (this.pinnedBackwards(f)) {
+                    set_at out f true
+                }
+                f = (f + 1)
+            }
+        }
         def order:[int] (this.cycleOrder())
         def s:int 0
         while (s < (array_length order)) {
-            def v:int (itemAt order s)
+            def v:int (this.repOf((itemAt order s)))
             if ((itemAt state v) == 0) {
                 this.dfsMark(v state out)
             }
@@ -502,17 +746,32 @@ class LayeredLayout {
         return out
     }
 
+    ; A group of shared rank is one node here, entered by its stand-in, and
+    ; the edges inside it are not followed: a cycle through a group is a
+    ; cycle through the rank it stands on.
     fn dfsMark:void (v:int state:[int] out:[boolean]) {
         set_at state v 1
         def k:int 0
         while (k < (graph.edgeCount())) {
             def e:FlowEdge (graph.edgeAt(k))
-            if (e.sourceIndex == v) {
-                def t:int e.targetIndex
+            def from:int (this.repOf(e.sourceIndex))
+            def t:int (this.repOf(e.targetIndex))
+            def pinned:boolean false
+            if (this.ranked()) {
+                if (this.isFlat(k)) {
+                    from = -1
+                }
+                pinned = (this.pinnedBackwards(k))
+                if pinned {
+                    from = (this.repOf(e.targetIndex))
+                    t = (this.repOf(e.sourceIndex))
+                }
+            }
+            if (from == v) {
                 if (t >= 0) {
                     def st:int (itemAt state t)
                     if (st == 1) {
-                        set_at out k true
+                        set_at out k (pinned == false)
                     }
                     if (st == 0) {
                         this.dfsMark(t state out)
@@ -637,6 +896,9 @@ class LayeredLayout {
                 }
                 v = (v + 1)
             }
+            if (this.levelRanks()) {
+                changed = true
+            }
         }
     }
 
@@ -673,6 +935,9 @@ class LayeredLayout {
         clear vInFrom
         clear vInEdge
         clear chainHead
+        clear flatFrom
+        clear flatTo
+        clear flatEdge
         def n:int (graph.nodeCount())
         def i:int 0
         while (i < n) {
@@ -709,8 +974,19 @@ class LayeredLayout {
                     if (useDummies == false) {
                         span = 1
                     }
+                    ; Both ends on one layer: a flat edge. It joins no two
+                    ; layers, so the sweeps and the crossing count do not see
+                    ; it; the ordering keeps it pointing along the layer
+                    ; instead (`keepFlatLayer`).
+                    if (lt == lf) {
+                        push flatFrom from
+                        push flatTo to
+                        push flatEdge e
+                    }
                     if (span <= 1) {
-                        this.linkVertices(from to e)
+                        if (lt != lf) {
+                            this.linkVertices(from to e)
+                        }
                     } {
                         ; one dummy per layer strictly between the two ends
                         def prev:int from
@@ -893,6 +1169,7 @@ class LayeredLayout {
     fn orderVertices:void () {
         this.seedVertexOrder()
         this.buildLayerLists()
+        this.keepFlatOrder()
         def lc:int (this.layerCount())
         orderWork = 0
         ; A layout whose lines meet boxes at points along them — the boxes
@@ -939,6 +1216,9 @@ class LayeredLayout {
                 }
             }
         }
+        ; Whatever the search settled on, or the memo handed back, a flat
+        ; edge still points along its layer.
+        this.keepFlatOrder()
         this.deriveNodeOrder()
     }
 
@@ -1031,6 +1311,7 @@ class LayeredLayout {
                 if (start >= 2) {
                     rng = (this.shuffleOrder(rng))
                 }
+                this.keepFlatOrder()
                 def again:int (this.searchFromHere((this.countCrossings())))
                 if (again < bestCount) {
                     bestCount = again
@@ -1104,6 +1385,7 @@ class LayeredLayout {
         while ((bestCount > 0) && (round < 4)) {
             this.transpose()
             this.sift()
+            this.keepFlatOrder()
             def after:int (this.countCrossings())
             if (after < bestCount) {
                 bestCount = after
@@ -1740,6 +2022,184 @@ class LayeredLayout {
             }
             y = (y + 1)
         }
+        this.keepFlatLayer(layer)
+    }
+
+    fn keepFlatOrder:void () {
+        if ((this.ranked()) == false) {
+            return
+        }
+        def lc:int (this.layerCount())
+        def l:int 0
+        while (l < lc) {
+            this.keepFlatLayer(l)
+            l = (l + 1)
+        }
+    }
+
+    ; The order within one layer, put right for its shared ranks. A group is
+    ; kept together, standing where its members stood on average — so the
+    ; sweeps still decide where in the layer it goes — and inside it every
+    ; flat edge's source comes before its target: left of it under TB, above
+    ; it under LR, which is the way Graphviz reads `a -> b` along a rank.
+    ; Members no flat edge orders keep the order the sweeps gave them, and a
+    ; cycle of flat edges is cut at the member that stood first.
+    fn keepFlatLayer:void (layer:int) {
+        if ((this.ranked()) == false) {
+            return
+        }
+        def seq:[int] (this.layerInOrder(layer))
+        def size:int (array_length seq)
+        if (size < 2) {
+            return
+        }
+        def groups:int (array_length rankKind)
+        def unitOf:[int]
+        def g0:int 0
+        while (g0 < groups) {
+            push unitOf -1
+            g0 = (g0 + 1)
+        }
+        ; The units of the layer: a vertex on its own, or a whole group.
+        def unitVert:[int]
+        def unitGroup:[int]
+        def unitSum:[double]
+        def unitCount:[int]
+        def i:int 0
+        while (i < size) {
+            def v:int (itemAt seq i)
+            def g:int (this.groupOf((itemAt vNode v)))
+            if ((g >= 0) && ((itemAt unitOf g) >= 0)) {
+                def u:int (itemAt unitOf g)
+                set_at unitSum u ((itemAt unitSum u) + (to_double i))
+                set_at unitCount u ((itemAt unitCount u) + 1)
+            } {
+                if (g >= 0) {
+                    set_at unitOf g (array_length unitVert)
+                }
+                push unitVert v
+                push unitGroup g
+                push unitSum (to_double i)
+                push unitCount 1
+            }
+            i = (i + 1)
+        }
+        def units:int (array_length unitVert)
+        if (units == size) {
+            return
+        }
+        ; Stable insertion sort by where each unit stands on average.
+        def sorted:[int]
+        def keys:[double]
+        def a:int 0
+        while (a < units) {
+            def key:double ((itemAt unitSum a) / (to_double (itemAt unitCount a)))
+            push sorted a
+            push keys key
+            def b:int ((array_length sorted) - 1)
+            while (b > 0) {
+                if ((itemAt keys (b - 1)) > key) {
+                    set_at keys b (itemAt keys (b - 1))
+                    set_at sorted b (itemAt sorted (b - 1))
+                    set_at keys (b - 1) key
+                    set_at sorted (b - 1) a
+                    b = (b - 1)
+                } {
+                    b = 0
+                }
+            }
+            a = (a + 1)
+        }
+        def slot:int 0
+        def s:int 0
+        while (s < units) {
+            def unit:int (itemAt sorted s)
+            def ug:int (itemAt unitGroup unit)
+            if (ug < 0) {
+                set_at vOrder (itemAt unitVert unit) slot
+                slot = (slot + 1)
+            } {
+                def members:[int]
+                def m:int 0
+                while (m < size) {
+                    def mv:int (itemAt seq m)
+                    if ((this.groupOf((itemAt vNode mv))) == ug) {
+                        push members mv
+                    }
+                    m = (m + 1)
+                }
+                def along:[int] (this.flatSequence(members))
+                def z:int 0
+                while (z < (array_length along)) {
+                    set_at vOrder (itemAt along z) slot
+                    slot = (slot + 1)
+                    z = (z + 1)
+                }
+            }
+            s = (s + 1)
+        }
+    }
+
+    ; A group's members in an order every flat edge among them agrees with:
+    ; each step takes the first member, as they stand now, that no member
+    ; still to come has a flat edge into. When every one has — a cycle — the
+    ; first is taken anyway.
+    fn flatSequence:[int] (members:[int]) {
+        def out:[int]
+        def taken:[boolean]
+        def count:int (array_length members)
+        def i:int 0
+        while (i < count) {
+            push taken false
+            i = (i + 1)
+        }
+        def step:int 0
+        while (step < count) {
+            def pick:int -1
+            def firstFree:int -1
+            def c:int 0
+            while (c < count) {
+                if ((itemAt taken c) == false) {
+                    if (firstFree < 0) {
+                        firstFree = c
+                    }
+                    if (pick < 0) {
+                        if ((this.flatWaiting((itemAt members c) members taken)) == false) {
+                            pick = c
+                        }
+                    }
+                }
+                c = (c + 1)
+            }
+            if (pick < 0) {
+                pick = firstFree
+            }
+            set_at taken pick true
+            push out (itemAt members pick)
+            step = (step + 1)
+        }
+        return out
+    }
+
+    ; Whether a flat edge arrives at `v` from a member not yet placed.
+    fn flatWaiting:boolean (v:int members:[int] taken:[boolean]) {
+        def f:int 0
+        while (f < (array_length flatTo)) {
+            if ((itemAt flatTo f) == v) {
+                def from:int (itemAt flatFrom f)
+                def k:int 0
+                while (k < (array_length members)) {
+                    if ((itemAt members k) == from) {
+                        if ((itemAt taken k) == false) {
+                            return true
+                        }
+                    }
+                    k = (k + 1)
+                }
+            }
+            f = (f + 1)
+        }
+        return false
     }
 
     fn neighbourCount:int (v:int useIncoming:boolean) {
@@ -1852,6 +2312,14 @@ class LayeredLayout {
             }
             v = (v + 1)
         }
+        ; Two neighbours joined by a flat edge stand a corridor apart rather
+        ; than a node gap: the arrow and its label are drawn between them.
+        def flatWiden:[double] (this.flatExtras())
+        def fw:int 0
+        while (fw < lc) {
+            set_at layerExtent fw ((itemAt layerExtent fw) + (itemAt flatWiden fw))
+            fw = (fw + 1)
+        }
         def widest:double 0.0
         def w:int 0
         while (w < lc) {
@@ -1877,6 +2345,7 @@ class LayeredLayout {
         }
         ; Place in (layer, order) sequence so the packing follows the ordering.
         def sequence:[int] (this.vertexRanking())
+        def before:int -1
         def slot:int 0
         while (slot < (array_length sequence)) {
             def target:int (itemAt sequence slot)
@@ -1884,6 +2353,14 @@ class LayeredLayout {
                 def l2:int (itemAt vLayer target)
                 def cross2:double (itemAt vExtent target)
                 def at:double (itemAt cursor l2)
+                if (before >= 0) {
+                    if ((itemAt vLayer before) == l2) {
+                        if (this.flatBetween(before target)) {
+                            at = (at + ((this.flatRoom(before target)) - nodeGap))
+                        }
+                    }
+                }
+                before = target
                 set_at cursor l2 ((at + cross2) + nodeGap)
                 ; A vertex's cross position is the CENTRE of the room it took,
                 ; which is what a dummy needs — an edge passes through the
@@ -1893,6 +2370,16 @@ class LayeredLayout {
                 if (ni2 >= 0) {
                     def nd2:FlowNode (graph.nodeAt(ni2))
                     def mainAt:double (itemAt layerMain l2)
+                    ; A node with a flat edge stands on the layer's middle
+                    ; line rather than its top, so a row of different heights
+                    ; still has one line through its sides for the edges.
+                    if (this.touchesFlat(ni2)) {
+                        def ownDepth:double nd2.width
+                        if (direction == "TB") {
+                            ownDepth = nd2.height
+                        }
+                        mainAt = (mainAt + (((itemAt layerDepth l2) - ownDepth) * 0.5))
+                    }
                     if (direction == "TB") {
                         nd2.x = (originX + at)
                         nd2.y = (originY + mainAt)
@@ -1910,6 +2397,103 @@ class LayeredLayout {
             this.balanceLayers()
         }
         this.faceNeighbours()
+        this.faceFlatEdges()
+    }
+
+    ; Whether a flat edge joins these two vertices, either way round.
+    fn flatBetween:boolean (a:int b:int) {
+        def f:int 0
+        while (f < (array_length flatFrom)) {
+            def x:int (itemAt flatFrom f)
+            def y:int (itemAt flatTo f)
+            if (((x == a) && (y == b)) || ((x == b) && (y == a))) {
+                return true
+            }
+            f = (f + 1)
+        }
+        return false
+    }
+
+    fn touchesFlat:boolean (v:int) {
+        def f:int 0
+        while (f < (array_length flatFrom)) {
+            if (((itemAt flatFrom f) == v) || ((itemAt flatTo f) == v)) {
+                return true
+            }
+            f = (f + 1)
+        }
+        return false
+    }
+
+    ; The room between two flat-edge neighbours: the layer gap, which is the
+    ; room an arrow between two layers gets, or more when a label written
+    ; along the edge needs it. A label lies along a TB row and beside an LR
+    ; column, so only under TB does its width count. Measured the way the
+    ; router measures the box it draws round a label, plus a stub each end.
+    fn flatRoom:double (a:int b:int) {
+        def room:double layerGap
+        if (direction != "TB") {
+            return room
+        }
+        def f:int 0
+        while (f < (array_length flatFrom)) {
+            def x:int (itemAt flatFrom f)
+            def y:int (itemAt flatTo f)
+            if (((x == a) && (y == b)) || ((x == b) && (y == a))) {
+                def e:FlowEdge (graph.edgeAt((itemAt flatEdge f)))
+                def need:double ((((to_double (strlen e.label)) * 8.2) + 14.0) + 40.0)
+                if (need > room) {
+                    room = need
+                }
+            }
+            f = (f + 1)
+        }
+        return room
+    }
+
+    ; Per layer, what the flat-edge neighbours in it add to its extent.
+    fn flatExtras:[double] () {
+        def lc:int (this.layerCount())
+        def out:[double]
+        def l:int 0
+        while (l < lc) {
+            def extra:double 0.0
+            if ((array_length flatFrom) > 0) {
+                def seq:[int] (this.layerInOrder(l))
+                def i:int 1
+                while (i < (array_length seq)) {
+                    def a:int (itemAt seq (i - 1))
+                    def b:int (itemAt seq i)
+                    if (this.flatBetween(a b)) {
+                        extra = (extra + ((this.flatRoom(a b)) - nodeGap))
+                    }
+                    i = (i + 1)
+                }
+            }
+            push out extra
+            l = (l + 1)
+        }
+        return out
+    }
+
+    ; A flat edge leaves the side of its source that faces its target and
+    ; arrives at the facing side of the target — straight across, where
+    ; `faceNeighbours` would have had it leave downwards and come back up.
+    fn faceFlatEdges:void () {
+        def f:int 0
+        while (f < (array_length flatEdge)) {
+            def e:FlowEdge (graph.edgeAt((itemAt flatEdge f)))
+            def a:FlowNode (graph.nodeAt(e.sourceIndex))
+            def b:FlowNode (graph.nodeAt(e.targetIndex))
+            if (direction == "TB") {
+                e.sourceHandle = (LayeredLayout.faceTo((a.centerX()) (b.centerX()) 3 1))
+                e.targetHandle = (LayeredLayout.faceTo((b.centerX()) (a.centerX()) 3 1))
+            } {
+                e.sourceHandle = (LayeredLayout.faceTo((a.centerY()) (b.centerY()) 0 2))
+                e.targetHandle = (LayeredLayout.faceTo((b.centerY()) (a.centerY()) 0 2))
+            }
+            f = (f + 1)
+        }
     }
 
     ; ----------------------------------------------------------- balance --
@@ -2264,6 +2848,10 @@ class LayeredLayout {
                             apart = nodeGap
                         }
                     }
+                }
+                ; Flat-edge neighbours keep the room their arrow was given.
+                if (this.flatBetween(prev v)) {
+                    apart = (this.flatRoom(prev v))
                 }
                 def gap:double ((((itemAt vExtent prev) + (itemAt vExtent v)) * 0.5) + apart)
                 acc = (acc + gap)

@@ -167,6 +167,7 @@ class RangerFlowTest {
         RangerFlowTest.testDotRecords(c)
         RangerFlowTest.testDotColors(c)
         RangerFlowTest.testDotEngines(c)
+        RangerFlowTest.testDotRankSame(c)
         RangerFlowTest.testMermaidGit(c)
         RangerFlowTest.testMermaidSubgraphEnds(c)
         RangerFlowTest.testCompoundLayout(c)
@@ -5055,6 +5056,103 @@ class RangerFlowTest {
         c.eqInt("the span is read off the tag" wide.span 2)
         span.measure()
         c.ok("and a spanning cell asks for more of the row" (wide.w > 60.0))
+    }
+
+    ; `{ rank=same; ... }` is the graph, not decoration: the slide that asked
+    ; for four steps on one row got one tall column while it was ignored.
+    sfn dotRankSource:string (dir:string) {
+        def src:string "digraph {\n"
+        src = (src + "  rankdir=" + dir + ";\n")
+        src = (src + "  node [shape=box];\n")
+        src = (src + "  {rank=same; L; E; O; S;}\n")
+        src = (src + "  L [label=\"Liidi\"]; E [label=\"Ensikauppa\"]; O [label=\"Onboarding\"]; S [label=\"Säännöllinen asiakas\"];\n")
+        src = (src + "  L -> E -> O -> S;\n")
+        src = (src + "  D [label=\"Summa ≥ 800?\", shape=diamond];\n")
+        src = (src + "  S -> D;\n")
+        src = (src + "  D -> A [label=\"Kyllä\"];\n")
+        src = (src + "  D -> K [label=\"Ei\"];\n")
+        src = (src + "  A [label=\"Avainasiakas\"]; K [label=\"Kasvuohjelma\"];\n")
+        src = (src + "}\n")
+        return src
+    }
+
+    sfn testDotRankSame:void (c:Checker) {
+        c.section("Graphviz DOT — rank=same")
+        def style (new FlowStyle)
+        def g:FlowGraph (DotFlow.build((DotReader.parse((RangerFlowTest.dotRankSource("TB")))) style))
+        def l:FlowNode (g.nodeById("L"))
+        def e:FlowNode (g.nodeById("E"))
+        def o:FlowNode (g.nodeById("O"))
+        def s:FlowNode (g.nodeById("S"))
+        def d:FlowNode (g.nodeById("D"))
+        def a:FlowNode (g.nodeById("A"))
+        def k:FlowNode (g.nodeById("K"))
+        c.near("TB: the four steps stand on one row" (e.centerY()) (l.centerY()) 0.5)
+        c.near("…all four" (o.centerY()) (l.centerY()) 0.5)
+        c.near("…S as well, though its label is longer" (s.centerY()) (l.centerY()) 0.5)
+        c.ok("TB: in the order the edges run, left to right" (((l.x + l.width) < e.x) && (((e.x + e.width) < o.x) && ((o.x + o.width) < s.x))))
+        c.ok("TB: with room for an arrow between neighbours, not a node gap" ((e.x - (l.x + l.width)) >= 56.0))
+        c.ok("TB: the decision is below the row" (d.y > (s.y + s.height)))
+        c.ok("TB: and its two outcomes below it" ((a.y > (d.y + d.height)) && (k.y > (d.y + d.height))))
+        c.eqInt("TB: nothing is drawn through a box" (EdgeOverlap.nodeCrossings(g)) 0)
+        c.eqInt("TB: no two lines lie on each other" (EdgeOverlap.pairs(g 2.0)) 0)
+        def flat:FlowEdge (g.edgeAt(0))
+        def fc:[double] (EdgeRouter.cornersFor(g flat))
+        c.eqInt("TB: a flat edge is one straight line" (array_length fc) 4)
+        c.near("TB: side to side, level" (itemAt fc 1) (itemAt fc 3) 0.5)
+        c.near("TB: leaving L's right side" (itemAt fc 0) (l.x + l.width) 0.5)
+        c.near("TB: and arriving at E's left" (itemAt fc 2) e.x 0.5)
+
+        def lg:FlowGraph (DotFlow.build((DotReader.parse((RangerFlowTest.dotRankSource("LR")))) style))
+        def ll:FlowNode (lg.nodeById("L"))
+        def le:FlowNode (lg.nodeById("E"))
+        def lo:FlowNode (lg.nodeById("O"))
+        def ls:FlowNode (lg.nodeById("S"))
+        def ld:FlowNode (lg.nodeById("D"))
+        def la:FlowNode (lg.nodeById("A"))
+        def lk:FlowNode (lg.nodeById("K"))
+        c.near("LR: the four steps stand in one column" (le.centerX()) (ll.centerX()) 0.5)
+        c.near("…all four" (lo.centerX()) (ll.centerX()) 0.5)
+        c.near("…S as well" (ls.centerX()) (ll.centerX()) 0.5)
+        c.ok("LR: in the order the edges run, top to bottom" (((ll.y + ll.height) < le.y) && (((le.y + le.height) < lo.y) && ((lo.y + lo.height) < ls.y))))
+        c.ok("LR: the decision is right of the column" (ld.x > (ls.x + ls.width)))
+        c.ok("LR: and its two outcomes right of it" ((la.x > (ld.x + ld.width)) && (lk.x > (ld.x + ld.width))))
+        c.eqInt("LR: nothing is drawn through a box" (EdgeOverlap.nodeCrossings(lg)) 0)
+        c.eqInt("LR: no two lines lie on each other" (EdgeOverlap.pairs(lg 2.0)) 0)
+        def lflat:FlowEdge (lg.edgeAt(1))
+        def lc:[double] (EdgeRouter.cornersFor(lg lflat))
+        c.eqInt("LR: a flat edge is one straight line" (array_length lc) 4)
+        c.near("LR: top to bottom, plumb" (itemAt lc 0) (itemAt lc 2) 0.5)
+
+        ; A flat edge written against the written order still points the way
+        ; it goes: the target stands after the source.
+        def back:FlowGraph (DotFlow.render("digraph { {rank=same; a; b} b -> a; a -> c; b -> c }"))
+        def ba:FlowNode (back.nodeById("a"))
+        def bb:FlowNode (back.nodeById("b"))
+        c.near("a flat edge shares its ends' row" ba.y bb.y 0.5)
+        c.ok("and its source stands left of its target" (bb.x < ba.x))
+
+        ; A cycle through a group is a cycle through its rank, and is broken
+        ; like any other rather than ranking forever.
+        def cyc:FlowGraph (DotFlow.render("digraph { {rank=same; a; b} a -> x -> b; }"))
+        def ca:FlowNode (cyc.nodeById("a"))
+        def cb:FlowNode (cyc.nodeById("b"))
+        def cx:FlowNode (cyc.nodeById("x"))
+        c.near("a path out of a group and back still leaves it on one row" ca.y cb.y 0.5)
+        c.ok("and the node between stands off that row" ((fabs (cx.y - ca.y)) > 1.0))
+
+        ; `min` and `max` are the two ends of the drawing.
+        def mm:FlowGraph (DotFlow.render("digraph { a -> b -> c -> d; {rank=min; c} {rank=max; a} e -> b }"))
+        def mc:FlowNode (mm.nodeById("c"))
+        def ma:FlowNode (mm.nodeById("a"))
+        def mb:FlowNode (mm.nodeById("b"))
+        def md:FlowNode (mm.nodeById("d"))
+        c.ok("rank=min stands on the first rank" ((mc.y <= ma.y) && ((mc.y <= mb.y) && (mc.y < md.y))))
+        c.ok("rank=max on the last" ((ma.y > mb.y) && (ma.y > md.y)))
+        def ss:FlowGraph (DotFlow.render("digraph { a -> b; x; {rank=source; b} }"))
+        def sx:FlowNode (ss.nodeById("x"))
+        def sb:FlowNode (ss.nodeById("b"))
+        c.ok("rank=source stands alone on the first rank" (sb.y < sx.y))
     }
 
     sfn testPlantUmlKinds:void (c:Checker) {

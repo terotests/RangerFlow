@@ -33,7 +33,8 @@
 ; **Some attributes are the graph, not its decoration.** `rank=same`,
 ; `constraint`, `weight`, `lhead`/`ltail`, `pos`. They are kept in the model
 ; even where nothing draws them yet, because dropping them silently draws a
-; different graph.
+; different graph. `rank` and `pos` are drawn: `DotFlow` hands the first to
+; the layered layout as a constraint and pins nodes by the second.
 ;
 ; **`strict` deduplicates.** `strict digraph { a->b; a->b }` is one edge, and
 ; the second statement's attributes land on the first edge rather than on a new
