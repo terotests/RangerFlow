@@ -2926,6 +2926,7 @@ class MermaidFlow {
         if (style.textFill > 1.0) {
             cl.labelScale = style.textFill
         }
+        cl.spacing = style.spacing
         d.describeGroups(cl g)
         cl.run()
         def lay:LayeredLayout cl.rootLayout

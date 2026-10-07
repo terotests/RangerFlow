@@ -55,6 +55,12 @@ class FlowStyle {
     ; Box labels set in bold (`FlowTheme.nodeBold`), measured bold too so
     ; they still fit their boxes. On for a slide, like `textFill`.
     def labelBold:boolean false
+    ; The gaps between boxes, layers and wrapped rows as a share of the
+    ; layout's own (1 as they are). A slide's diagram is scaled to its room
+    ; whole, so gaps given back are larger boxes and text there. Floors a
+    ; label or a corridor needs still hold; a DOT `ranksep`/`nodesep` the
+    ; author wrote is kept.
+    def spacing:double 1.0
     ; The theme name, or a space-separated list of them — `EVGStyleSheet`
     ; takes several at once so a look and a place can be scoped separately.
     def theme:string ""

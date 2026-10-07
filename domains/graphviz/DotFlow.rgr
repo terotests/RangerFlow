@@ -602,6 +602,12 @@ class DotFlow {
                 lay.layerGap = 150.0
             }
         }
+        if ((this.has("ranksep")) == false) {
+            lay.layerGap = (lay.layerGap * style.spacing)
+        }
+        if ((this.has("nodesep")) == false) {
+            lay.nodeGap = (lay.nodeGap * style.spacing)
+        }
         def shared:int (this.shareRanks(lay))
         lay.run()
         def banded:int (this.bandLayout(lay))
