@@ -64,6 +64,13 @@ class FlowStyle {
     ; label or a corridor needs still hold; a DOT `ranksep`/`nodesep` the
     ; author wrote is kept.
     def spacing:double 1.0
+    ; The fewest ranks a flow is cut into rows or columns at (`FlowWrap`,
+    ; when the caller gives a room's aspect). A page's diagram sits in a
+    ; column of text and only a long chain is worth cutting; a slide's has
+    ; the room to itself, and a chain of four drawn as two rows of larger
+    ; boxes can read better than one strip, which the slide's own choice
+    ; between the two decides.
+    def wrapFrom:int 6
     ; The theme name, or a space-separated list of them — `EVGStyleSheet`
     ; takes several at once so a look and a place can be scoped separately.
     def theme:string ""

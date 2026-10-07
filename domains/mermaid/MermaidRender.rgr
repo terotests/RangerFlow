@@ -79,6 +79,16 @@ class MermaidRender {
         return d.diagramKind
     }
 
+    ; Why a flowchart was not drawn, with the line (1 = the text's first):
+    ; "the [ after A is not closed with ] — line 2". "" when it reads.
+    sfn errorOf:string (text:string) {
+        def d:MermaidDiagram (MermaidReader.parse(text))
+        if ((d.diagramKind != "flowchart") || ((strlen d.error) == 0)) {
+            return ""
+        }
+        return ((d.error + " — line ") + (to_string d.errorLine))
+    }
+
     ; The notation a dialect is drawn in. Three of them are UML shapes and one
     ; is crow's foot; everything else is drawn plain.
     sfn notationFor:string (kind:string) {
@@ -336,6 +346,10 @@ class MermaidRender {
         ; with nodes in it is worth drawing whatever it called itself.
         def n:int (d.nodeCount())
         if (n == 0) { return out }
+        ; Mermaid draws a flowchart it cannot read as an error and nothing
+        ; else; half a diagram with the broken line left out would look like
+        ; the whole one (`errorOf` says why).
+        if ((kind == "flowchart") && ((strlen d.error) > 0)) { return out }
         if ((strlen kind) == 0) { out.kind = "flowchart" }
         out.graph = (MermaidFlow.styledWith(d style memo))
         out.ok = true
@@ -378,7 +392,7 @@ class MermaidRender {
         if (aspect > 0.0) {
             def wrap (new FlowWrap())
             wrap.spacing = style.spacing
-            wrap.applyFlow(drawing.graph aspect 6)
+            wrap.applyFlow(drawing.graph aspect style.wrapFrom)
         }
         def v:FlowView (FlowView.of(drawing.graph))
         v.notation = drawing.notation

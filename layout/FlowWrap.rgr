@@ -24,6 +24,7 @@
 ;
 ;   down, same column        bottom → top, through the gap between the rows
 ;   up or level, same column right side → out past the column → right side
+;                            (left side, round the left, in the first column)
 ;   to a later column        bottom → down → the gutter → over → top
 ;   to an earlier column     left side → the gutter to its left → right side
 ;
@@ -571,6 +572,18 @@ class FlowWrap {
                 def acy:double (a.y + (a.height * 0.5))
                 def bcx:double (b.x + (b.width * 0.5))
                 def bcy:double (b.y + (b.height * 0.5))
+                if ((ca == cb) && (ca == 0) && (columns > 1) && (bcy <= acy)) {
+                    ; up or level in the first column: round its left-hand
+                    ; side, outside the drawing. Its right-hand side is the
+                    ; gutter the link to the next column runs down, and a
+                    ; way back there lies on that run, name on name.
+                    def k0:int (itemAt lanes 0)
+                    set lanes 0 (k0 + 1)
+                    def left:double a.x
+                    if (b.x < left) { left = b.x }
+                    def xl:double ((left - out) - ((to_double k0) * lane))
+                    FlowWrap.route(ed ([] _:double (a.x acy xl acy xl bcy b.x bcy)) 3 3)
+                } {
                 if ((ca == cb) && ((array_length laid) >= 4)) {
                     ; A route the layout drew, within one column: a long
                     ; edge's lane past the boxes between its ends, a way
@@ -625,6 +638,7 @@ class FlowWrap {
                 }
                 }
                 }
+                }
             }
             e = (e + 1)
         }
@@ -671,6 +685,14 @@ class FlowWrap {
         while (i < (array_length pts)) {
             push ed.waypoints (itemAt pts i)
             i = (i + 1)
+        }
+        ; an end moved to another side leaves the spread it had along the old
+        ; one: kept, it would put the end off the new side, inside a shape
+        if (ed.sourceHandle != fromSide) {
+            ed.portNudgeSource = 0.0
+        }
+        if (ed.targetHandle != toSide) {
+            ed.portNudgeTarget = 0.0
         }
         ed.sourceHandle = fromSide
         ed.targetHandle = toSide

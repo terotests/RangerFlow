@@ -200,6 +200,8 @@ class RangerFlowTest {
         RangerFlowTest.testDataBinding(c)
         RangerFlowTest.testTextFitting(c)
         RangerFlowTest.testSlideText(c)
+        RangerFlowTest.testLinkKinds(c)
+        RangerFlowTest.testFlowchartErrors(c)
         RangerFlowTest.testEdgeLabelRoom(c)
         RangerFlowTest.testInPlaceEditing(c)
         RangerFlowTest.testSideHandles(c)
@@ -3172,7 +3174,7 @@ class RangerFlowTest {
         def md:MermaidDiagram (MermaidReader.parse("flowchart LR\n  A[\"`**Bold** text`\"] --> B\n"))
         def mdg:FlowGraph (md.build())
         def mdA:FlowNode (mdg.nodeById("A"))
-        c.eqStr("the backticks are not part of the label" mdA.label "**Bold** text")
+        c.eqStr("the backticks and the emphasis marks are not part of the label" mdA.label "Bold text")
 
         ; `<br/>` is a line the author asked for, and the layout can take one.
         def br:MermaidDiagram (MermaidReader.parse("flowchart TD\n  A[\"Two<br/>lines\"]\n"))
@@ -7748,6 +7750,112 @@ class RangerFlowTest {
             }
             d = (d + 1)
         }
+    }
+
+    ; The scene item of an edge's line, by the edge's id.
+    sfn lineOf:SceneItem (sc:FlowScene id:string) {
+        def i:int 0
+        while (i < (array_length sc.items)) {
+            def it:SceneItem (itemAt sc.items i)
+            if (((it.tag == ("edge:" + id)) && (it.kind == 2)) && (it.closed == false)) {
+                return it
+            }
+            i = (i + 1)
+        }
+        return (new SceneItem)
+    }
+
+    sfn testLinkKinds:void (c:Checker) {
+        c.section("A line carries its kind: ends, dashes, weight, colour (linkStyle)")
+        def src:string "flowchart LR\n  A -->|n| B\n  A -.-> C\n  A ==> D\n  A --o E\n  A --x F\n  B <--> C\n  linkStyle 1 stroke:#ff0000,stroke-width:4px\n"
+        def d:MermaidDiagram (MermaidReader.parse(src))
+        def g:FlowGraph (d.build())
+        def e1:FlowEdge (g.edgeAt(1))
+        c.eqStr("linkStyle 1 colours the second link" e1.strokeColor "#ff0000")
+        c.near("…and sets its weight" e1.strokeWidth 4.0 0.001)
+        c.near("…and keeps its dashes" e1.dash 5.0 0.001)
+        def e0:FlowEdge (g.edgeAt(0))
+        c.eqStr("the first link is the look's colour" e0.strokeColor "")
+        def sc:FlowScene (MermaidRender.sceneOf(src "default" 0.0 8.0))
+        def ids:[string]
+        def k:int 0
+        while (k < (g.edgeCount())) {
+            def ek:FlowEdge (g.edgeAt(k))
+            push ids ek.id
+            k = (k + 1)
+        }
+        def plain:SceneItem (RangerFlowTest.lineOf(sc (itemAt ids 0)))
+        c.eqStr("--> ends in an arrowhead" plain.head "arrowclosed")
+        c.eqStr("…and starts with nothing" plain.tail "")
+        c.ok("…its colour is the look's" (plain.own == false))
+        c.near("…its weight the look's" plain.weight 1.0 0.001)
+        def dotted:SceneItem (RangerFlowTest.lineOf(sc (itemAt ids 1)))
+        c.ok("-.-> is dashed" (dotted.dash > 0.0))
+        c.ok("linkStyle's colour is the line's own" dotted.own)
+        c.ok("linkStyle's 4px is heavier than the look's" (dotted.weight > 2.0))
+        def thick:SceneItem (RangerFlowTest.lineOf(sc (itemAt ids 2)))
+        c.ok("==> is heavier than the look's line" (thick.weight > 1.5))
+        def circ:SceneItem (RangerFlowTest.lineOf(sc (itemAt ids 3)))
+        c.eqStr("--o ends in a circle" circ.head "circle")
+        def cross:SceneItem (RangerFlowTest.lineOf(sc (itemAt ids 4)))
+        c.eqStr("--x ends in a cross" cross.head "cross")
+        def both:SceneItem (RangerFlowTest.lineOf(sc (itemAt ids 5)))
+        c.eqStr("<--> ends in an arrowhead" both.head "arrowclosed")
+        c.eqStr("…and starts with one" both.tail "arrowclosed")
+
+        def all:MermaidDiagram (MermaidReader.parse("flowchart LR\n  A --> B --> C\n  linkStyle default stroke:#00f\n  linkStyle 1 stroke:#f00\n"))
+        def ga:FlowGraph (all.build())
+        def ga0:FlowEdge (ga.edgeAt(0))
+        def ga1:FlowEdge (ga.edgeAt(1))
+        c.eqStr("linkStyle default colours every link" ga0.strokeColor "#00f")
+        c.eqStr("…and a later one by index wins" ga1.strokeColor "#f00")
+
+        def dot:string "digraph { node [style=filled, fillcolor=\"#1d2a6b\", fontcolor=white]; a -> b [color=red, style=dashed]; }"
+        def dsc:FlowScene (DotRender.sceneOf(dot "default" 0.0 8.0))
+        def ownBox:boolean false
+        def i:int 0
+        while (i < (array_length dsc.items)) {
+            def it:SceneItem (itemAt dsc.items i)
+            if ((it.tag == "node:a") && ((it.kind == 0) || ((it.kind == 2) && it.closed))) {
+                ownBox = (ownBox || it.own)
+            }
+            i = (i + 1)
+        }
+        c.ok("a DOT fillcolor is the node's own" ownBox)
+        def ddraw:DotDrawing (DotRender.draw(dot (new FlowStyle)))
+        def de0:FlowEdge (ddraw.graph.edgeAt(0))
+        def dl:SceneItem (RangerFlowTest.lineOf(dsc de0.id))
+        c.ok("a DOT color=red is the edge's own" dl.own)
+        c.ok("a DOT style=dashed edge is dashed" (dl.dash > 0.0))
+
+        def md:MermaidDiagram (MermaidReader.parse("flowchart LR\n  A[\"`**Bold** and *it_alic* snake_case`\"] --> B[\"**kept**\"]\n"))
+        def mg:FlowGraph (md.build())
+        def ma:FlowNode (mg.nodeById("A"))
+        def mb:FlowNode (mg.nodeById("B"))
+        c.eqStr("a markdown string drops its emphasis marks" ma.label "Bold and it_alic snake_case")
+        c.eqStr("a plain quoted string keeps its asterisks, as Mermaid does" mb.label "**kept**")
+    }
+
+    sfn testFlowchartErrors:void (c:Checker) {
+        c.section("A flowchart Mermaid refuses is refused, with its line")
+        def open:MermaidDiagram (MermaidReader.parse("flowchart LR\n  A[Open --> B\n  C --> D\n"))
+        c.ok(("an unclosed [ is an error: " + open.error) ((indexOf open.error "not closed") >= 0))
+        c.eqInt("…on line 2" open.errorLine 2)
+        def dangling:MermaidDiagram (MermaidReader.parse("flowchart LR\n  A --> B\n\n  C -->\n"))
+        c.ok(("a link to nothing is an error: " + dangling.error) ((indexOf dangling.error "ends at no box") >= 0))
+        c.eqInt("…on line 4" dangling.errorLine 4)
+        def broken:MermaidDrawing (MermaidRender.draw("flowchart LR\n  C -->\n" (new FlowStyle)))
+        c.ok("the broken flowchart is not drawn" (broken.ok == false))
+        c.eqStr("errorOf names the line" (MermaidRender.errorOf("flowchart LR\n  C -->\n")) "the link from C ends at no box — line 2")
+        def ids:MermaidDiagram (MermaidReader.parse("flowchart LR\n  start-node --> v1.2\n  a_b --> c\n"))
+        c.eqStr("ids with - and . read, as in Mermaid" ids.error "")
+        c.eqInt("…as two links" (ids.linkCount()) 2)
+        def fine:string "flowchart TD\n  A([Start]) --> B{Ok?}\n  B -->|yes| C[(DB)] & D[[Sub]]\n  B -- no --> A\n  E@{ shape: rounded, label: \"New\" } ~~~ F\n  A:::hot --> G>Flag]\n  classDef hot fill:#f00\n  click A callback\n"
+        def fd:MermaidDiagram (MermaidReader.parse(fine))
+        c.eqStr("a flowchart Mermaid reads has no error" fd.error "")
+        def fg:FlowGraph (fd.build())
+        def inv:FlowEdge (fg.edgeAt(4))
+        c.ok("~~~ is a link that is not drawn" inv.hidden)
     }
 
     sfn testSlideText:void (c:Checker) {
