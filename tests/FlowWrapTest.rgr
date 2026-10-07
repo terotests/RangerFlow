@@ -254,6 +254,15 @@ class FlowWrapTest {
         this.ok(((fabs (l.height - boxH)) < 0.01) "a box keeps its size")
         this.ok(((FlowWrapTest.overlaps(g)) == 0) "no two boxes overlap")
         this.ok(((EdgeOverlap.nodeCrossings(g)) == 0) ("no line goes through a box: " + (to_string (EdgeOverlap.nodeCrossings(g)))))
+        ; a slide's spacing closes the rows up, and still nothing collides
+        def gt:FlowGraph (FlowWrapTest.graphOf(text))
+        def tight (new FlowWrap())
+        tight.spacing = 0.6
+        tight.applyFlow(gt 2.9 6)
+        def ht:double (FlowWrapTest.height(gt))
+        this.ok((ht < (h1 * 0.92)) ("spacing 0.6: the rows closer: " + (to_string ht) + " from " + (to_string h1)))
+        this.ok(((FlowWrapTest.overlaps(gt)) == 0) "…no two boxes overlap")
+        this.ok(((EdgeOverlap.nodeCrossings(gt)) == 0) ("…and no line goes through a box: " + (to_string (EdgeOverlap.nodeCrossings(gt)))))
         ; a space as wide as the strip keeps it, and a top-to-bottom flow
         ; still goes into columns
         def g2:FlowGraph (FlowWrapTest.graphOf(text))

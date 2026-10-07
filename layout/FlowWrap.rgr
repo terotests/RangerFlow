@@ -162,6 +162,8 @@ class FlowWrap {
     ; the unit every gap is measured in, when the caller knows it better
     ; than the boxes' heights do (a graph turned a quarter: `applyAcross`)
     def unitGiven:double 0.0
+    ; the gaps below as a share of their usual size (1: as they are)
+    def spacing:double 1.0
 
     Constructor () {
         def a:[double]
@@ -405,16 +407,18 @@ class FlowWrap {
         ; name on a gutter run does not sit on a box. Rows get the same
         ; consideration for the names on the edges between them.
         def label:double (FlowWrap.widestLabel(g))
-        gap = (u * 2.6)
-        if ((label + (u * 1.2)) > gap) {
-            gap = (label + (u * 1.2))
+        ; `spacing` (a slide's, `FlowStyle.spacing`) closes them up; a
+        ; gutter still holds the widest name
+        gap = ((u * 2.6) * spacing)
+        if ((label + ((u * 1.2) * spacing)) > gap) {
+            gap = (label + ((u * 1.2) * spacing))
         }
-        rowGap = (u * 1.6)
+        rowGap = ((u * 1.6) * spacing)
         if (label > 0.0) {
-            rowGap = (u * 2.0)
+            rowGap = ((u * 2.0) * spacing)
         }
         this.measure(g rowOf)
-        edgeOut = (u * 0.8)
+        edgeOut = ((u * 0.8) * spacing)
         if ((this.findCuts(g rowOf)) == 0) {
             return false
         }

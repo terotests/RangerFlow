@@ -101,8 +101,7 @@ class DotRender {
         }
         if (aspect > 0.0) {
             def wrap (new FlowWrap())
-            wrap.gap = (wrap.gap * style.spacing)
-            wrap.rowGap = (wrap.rowGap * style.spacing)
+            wrap.spacing = style.spacing
             wrap.applyFlow(drawing.graph aspect 6)
         }
         def v:FlowView (FlowView.of(drawing.graph))
