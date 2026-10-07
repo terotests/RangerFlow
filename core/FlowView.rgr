@@ -30,6 +30,7 @@ Import "FlowScene.rgr"
 Import "FlowTheme.rgr"
 Import "FlowText.rgr"
 Import "pkg:evg/EVGTextMeasurer.rgr"
+Import "pkg:evg/EVGCodepoint.rgr"
 
 ; Where the minimap is on the screen, and what part of the flow it is
 ; showing. A value, because it is worked out from the graph and the viewport
@@ -303,11 +304,13 @@ class FlowView {
     }
 
     fn textWidthBold:double (t:string size:double bold:boolean) {
+        ; per character, not per storage unit: on C++ a string is UTF-8
+        ; bytes, and "ä" measured as its two bytes was two wrong glyphs
         def w:double 0.0
+        def cps:[int] (to_chars t)
         def i:int 0
-        while (i < (strlen t)) {
-            def c:int (charAt t i)
-            w = (w + (measurer.measureChar(c theme.fontFamily size)))
+        while (i < (array_length cps)) {
+            w = (w + (measurer.measureChar((itemAt cps i) theme.fontFamily size)))
             i = (i + 1)
         }
         w = (w * (FlowView.slack()))
@@ -332,19 +335,16 @@ class FlowView {
         def out:string ""
         def i:int 0
         while (i < (strlen t)) {
-            def c:int (charAt t i)
-            def cText:string (substring t i (i + 1))
+            ; a whole character at a time, so the cut never splits one
+            def c:int (EVGCodepoint.codeAt(t i))
+            def step:int (EVGCodepoint.unitsAt(t i))
             def cw:double (measurer.measureChar(c theme.fontFamily size))
             if ((acc + cw) > budget) {
                 return (out + "…")
             }
             acc = (acc + cw)
-            if (c < 128) {
-                out = (out + (strfromcode c))
-            } {
-                out = (out + cText)
-            }
-            i = (i + 1)
+            out = (out + (substring t i (i + step)))
+            i = (i + step)
         }
         return out
     }

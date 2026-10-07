@@ -3059,7 +3059,7 @@ class FlowEditor {
     ; measures for real when it draws, and this only has to keep a label off
     ; the edge.
     sfn labelWidth:double (label:string) {
-        return ((to_double (strlen label)) * 8.2)
+        return ((to_double (char_length label)) * 8.2)
     }
 
     fn setSelectedShape:boolean (shape:string) {

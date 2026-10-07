@@ -1549,7 +1549,7 @@ class EdgeLanes {
 
     ; The box a label takes, near enough: the theme's 11px face.
     sfn labelWidth:double (e:FlowEdge) {
-        return (((to_double (strlen e.label)) * 6.6) + 12.0)
+        return (((to_double (char_length e.label)) * 6.6) + 12.0)
     }
 
     ; Whether an edge is, on the whole, going up or down the page.

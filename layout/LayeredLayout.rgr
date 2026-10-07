@@ -2441,7 +2441,7 @@ class LayeredLayout {
             def y:int (itemAt flatTo f)
             if (((x == a) && (y == b)) || ((x == b) && (y == a))) {
                 def e:FlowEdge (graph.edgeAt((itemAt flatEdge f)))
-                def need:double ((((to_double (strlen e.label)) * 8.2) + 14.0) + 40.0)
+                def need:double ((((to_double (char_length e.label)) * 8.2) + 14.0) + 40.0)
                 if (need > room) {
                     room = need
                 }

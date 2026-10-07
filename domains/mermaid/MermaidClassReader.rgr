@@ -57,6 +57,7 @@
 
 Import "MermaidReader.rgr"
 Import "../uml/UMLModel.rgr"
+Import "pkg:evg/EVGCodepoint.rgr"
 
 ; A comment on the diagram, or on one class in it.
 class MermaidClassNote {
@@ -906,7 +907,8 @@ class MermaidClassFlow {
             } {
                 run = (run + 1)
             }
-            i = (i + 1)
+            ; a character at a time: on C++ the string is UTF-8 bytes
+            i = (i + (EVGCodepoint.unitsAt(text i)))
         }
         if (run > best) { best = run }
         return best

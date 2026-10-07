@@ -18,6 +18,7 @@
 Import "../../../rangerdb/src/schema/DatabaseSchema.rgr"
 Import "../../core/GraphModel.rgr"
 Import "pkg:evg/EVGTextMeasurer.rgr"
+Import "pkg:evg/EVGCodepoint.rgr"
 
 class SchemaToGraph {
     def measurer:EVGTextMeasurer (new EVGTextMeasurer)
@@ -45,9 +46,10 @@ class SchemaToGraph {
         def w:double 0.0
         def i:int 0
         while (i < (strlen t)) {
-            def c:int (charAt t i)
+            ; a character at a time: on C++ the string is UTF-8 bytes
+            def c:int (EVGCodepoint.codeAt(t i))
             w = (w + (measurer.measureChar(c fontFamily size)))
-            i = (i + 1)
+            i = (i + (EVGCodepoint.unitsAt(t i)))
         }
         ; Same generosity FlowView measures with: a node sized from a shorter
         ; estimate than the renderer uses is a node its own text runs out of.

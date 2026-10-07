@@ -44,6 +44,7 @@ Import "../../layout/EdgeLanes.rgr"
 Import "../../layout/OrthoRouter.rgr"
 Import "../flowchart/Flowchart.rgr"
 Import "../uml/UMLModel.rgr"
+Import "pkg:evg/EVGCodepoint.rgr"
 
 ; ---------------------------------------------------------------------------
 ; The model
@@ -2199,7 +2200,8 @@ class PlantUmlEntityFlow {
         def i:int 0
         while (i < (strlen text)) {
             def c:int (charAt text i)
-            i = (i + 1)
+            ; a character at a time: on C++ the string is UTF-8 bytes
+            i = (i + (EVGCodepoint.unitsAt(text i)))
             if (c == 10) {
                 if (run > best) { best = run }
                 run = 0
