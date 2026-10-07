@@ -101,13 +101,14 @@ class DotRender {
         }
         if (aspect > 0.0) {
             def wrap (new FlowWrap())
-            wrap.apply(drawing.graph aspect 6)
+            wrap.spacing = style.spacing
+            wrap.applyFlow(drawing.graph aspect 6)
         }
         def v:FlowView (FlowView.of(drawing.graph))
         v.notation = drawing.notation
         style.applyToTheme(v.theme)
         if (style.textFill > 1.0) {
-            v.fillText(style.textFill)
+            v.fillTextAnd(style.textFill (style.labelMost()))
         }
         v.showBackground = false
         v.theme.background = "#ffffff"

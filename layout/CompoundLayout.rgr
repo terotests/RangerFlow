@@ -115,6 +115,9 @@ class CompoundLayout {
     def nodeGapLR:double 36.0
     def minLayerGapLR:double 72.0
     def squareUp:boolean true
+    ; The gaps above and their floors, times this (`FlowStyle.spacing`);
+    ; a label's room and an arrow's stubs still hold (`floorOf`).
+    def spacing:double 1.0
     ; Centre every node on its neighbours once the layers are ordered — see
     ; `LayeredLayout.balance`. A chain of groups hangs under the group it
     ; starts from rather than in the middle of the page.
@@ -285,6 +288,15 @@ class CompoundLayout {
         return ""
     }
 
+    ; A layer gap's floor: never under what an arrow's two stubs and its
+    ; head need, however tight the spacing (a label's room is added after).
+    sfn floorOf:double (g:double) {
+        if (g < 40.0) {
+            return 40.0
+        }
+        return g
+    }
+
     fn configure:void (lay:LayeredLayout dir:string) {
         lay.memo = memo
         lay.squareUp = squareUp
@@ -292,9 +304,12 @@ class CompoundLayout {
         lay.unconnectedAside = balance
         if (CompoundLayout.isHorizontal(dir)) {
             lay.direction = "LR"
-            lay.layerGap = layerGapLR
-            lay.nodeGap = nodeGapLR
-            lay.minLayerGap = minLayerGapLR
+            lay.layerGap = (layerGapLR * spacing)
+            lay.nodeGap = (nodeGapLR * spacing)
+            lay.minLayerGap = (CompoundLayout.floorOf((minLayerGapLR * spacing)))
+            if (lay.layerGap < lay.minLayerGap) {
+                lay.layerGap = lay.minLayerGap
+            }
             if labelRoomLR {
                 def chars:int (lay.longestLabel())
                 def labelRoom:double ((((to_double chars) * 6.6) * labelScale) + 48.0)
@@ -304,9 +319,12 @@ class CompoundLayout {
             }
         } {
             lay.direction = "TB"
-            lay.layerGap = layerGapTB
-            lay.nodeGap = nodeGapTB
-            lay.minLayerGap = minLayerGapTB
+            lay.layerGap = (layerGapTB * spacing)
+            lay.nodeGap = (nodeGapTB * spacing)
+            lay.minLayerGap = (CompoundLayout.floorOf((minLayerGapTB * spacing)))
+            if (lay.layerGap < lay.minLayerGap) {
+                lay.layerGap = lay.minLayerGap
+            }
         }
     }
 

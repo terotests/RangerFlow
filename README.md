@@ -1346,6 +1346,12 @@ written into `domains/graphviz/DotColors.rgr`, which is generated and says so
 on its first line. A name Graphviz does not know is left to the theme rather
 than guessed at.
 
+`{ rank=same; a; b }` is drawn as written: the members share a rank, an edge
+between two of them runs straight along it in the direction it points — left
+to right under `rankdir=TB`, top to bottom under `LR` — with room for its arrow
+and label, and `rank=min`, `source`, `max` and `sink` put a group at the top or
+the bottom of the drawing.
+
 `layout=` picks the drawing: `dot` ranks, `neato`/`fdp`/`sfdp` push,
 `twopi`/`circo` ring — and the two that are not ranked draw straight edges,
 because an orthogonal line between two nodes that are merely near each other is

@@ -377,13 +377,14 @@ class MermaidRender {
         }
         if (aspect > 0.0) {
             def wrap (new FlowWrap())
-            wrap.apply(drawing.graph aspect 6)
+            wrap.spacing = style.spacing
+            wrap.applyFlow(drawing.graph aspect 6)
         }
         def v:FlowView (FlowView.of(drawing.graph))
         v.notation = drawing.notation
         style.applyToTheme(v.theme)
         if (style.textFill > 1.0) {
-            v.fillText(style.textFill)
+            v.fillTextAnd(style.textFill (style.labelMost()))
         }
         ; No canvas. The editor's paper and its grid of dots are part of an
         ; EDITOR; a diagram sitting in a column of prose or on a printed page

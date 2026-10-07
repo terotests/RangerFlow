@@ -524,7 +524,7 @@ other scenario, so it cannot rot behind the default.
 | | |
 | --- | --- |
 | **Records and HTML labels** | A layout language inside a label, with ports the edges then aim at. The same shape of problem as Creole, and the same place a reasonable scope line gets drawn. |
-| **Attributes that are semantics** | `rank=same`, `constraint=false`, `weight`, `lhead`/`ltail`. Ignore them and the drawing is a different graph, silently. These have to reach `LayeredLayout`, not just the style layer. |
+| **Attributes that are semantics** | `rank=same`, `constraint=false`, `weight`, `lhead`/`ltail`. Ignore them and the drawing is a different graph, silently. These have to reach `LayeredLayout`, not just the style layer. `rank` does now (`same`, `min`, `source`, `max`, `sink`): a shared layer, and flat edges drawn along it. |
 | **The attribute surface is not enumerable** | No `-language` dump, and unknown attributes are accepted in silence (§8). Unknown coverage can hide; only the corpus finds it. |
 | **Default scoping** | Ordered and lexically scoped (§1). Easy to implement approximately and be wrong on one file in twenty. `-Tjson0` prints the resolved answer, which is the only reason this is scoreable at all. |
 | **61 shapes** | Most are one polygon primitive with sides/skew/distortion/peripheries, and `FlowShapes` already has a `polygon`. The tail is the biology shapes nobody diagrams with. |

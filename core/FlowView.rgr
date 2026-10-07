@@ -2035,13 +2035,13 @@ class FlowView {
         def room:double (itemAt box 0)
         def tall:double (itemAt box 1)
         def text:string (this.textFor(tag n.label))
-        def lay:FlowTextLayout (this.layoutText(text size room tall (this.linesForText(tall size text))))
+        def lay:FlowTextLayout (this.layoutTextBold(text size room tall (this.linesForText(tall size text)) theme.nodeBold))
         def cx:double (FlowShapes.labelCX(n.shape x y w h))
         def cy:double (FlowShapes.labelCY(n.shape x y w h))
         this.paintEditField(sc tag cx cy lay room)
         def shapeInk:string (this.labelColor(n theme.nodeText))
-        def top:double (this.paintBlock(sc lay cx cy shapeInk tag false))
-        this.paintCaret(sc tag lay cx top false)
+        def top:double (this.paintBlock(sc lay cx cy shapeInk tag theme.nodeBold))
+        this.paintCaret(sc tag lay cx top theme.nodeBold)
     }
 
     ; The colour a node's own label is set in. The theme's, unless the node
@@ -2187,7 +2187,7 @@ class FlowView {
                 def h:double (this.sl(n.height))
                 def box:[double] (this.labelRoomOf(n w h size plain))
                 def tall:double (itemAt box 1)
-                def lay:FlowTextLayout (this.layoutText(n.label size (itemAt box 0) tall (this.linesForText(tall size n.label))))
+                def lay:FlowTextLayout (this.layoutTextBold(n.label size (itemAt box 0) tall (this.linesForText(tall size n.label)) theme.nodeBold))
                 if lay.truncated {
                     return false
                 }
@@ -2207,10 +2207,24 @@ class FlowView {
     ; the same factor so a branch's "yes" stays in step with its boxes.
     ; Returns the factor used.
     fn fillText:double (most:double) {
+        return (this.fillTextAnd(most most))
+    }
+
+    ; The same, with the names on the lines grown at most `labelMost`: a
+    ; box has room round its label, a line's name sits in a gap the layout
+    ; measured for it, and grown past that it runs over the next line.
+    fn fillTextAnd:double (most:double labelMost:double) {
         def k:double (this.textRoom(most))
+        def lk:double k
+        if (lk > labelMost) {
+            lk = labelMost
+        }
+        if (lk < 1.0) {
+            lk = k
+        }
         theme.headerFontSize = (theme.headerFontSize * k)
-        theme.labelFontSize = (theme.labelFontSize * k)
-        labelGrow = k
+        theme.labelFontSize = (theme.labelFontSize * lk)
+        labelGrow = lk
         return k
     }
 
@@ -2223,13 +2237,13 @@ class FlowView {
         def room:double (itemAt box 0)
         def tall:double (itemAt box 1)
         def text:string (this.textFor(tag n.label))
-        def lay:FlowTextLayout (this.layoutText(text size room tall (this.linesForText(tall size text))))
+        def lay:FlowTextLayout (this.layoutTextBold(text size room tall (this.linesForText(tall size text)) theme.nodeBold))
         def cx:double (x + (w * 0.5))
         def cy:double (y + (h * 0.5))
         this.paintEditField(sc tag cx cy lay room)
         def plainInk:string (this.labelColor(n theme.nodeText))
-        def top:double (this.paintBlock(sc lay cx cy plainInk tag false))
-        this.paintCaret(sc tag lay cx top false)
+        def top:double (this.paintBlock(sc lay cx cy plainInk tag theme.nodeBold))
+        this.paintCaret(sc tag lay cx top theme.nodeBold)
     }
 
     ; The compartment node: header, then sections of rows. Geometry comes from

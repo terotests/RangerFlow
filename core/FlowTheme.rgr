@@ -31,6 +31,9 @@ class FlowTheme {
     def nodeRadius:double 6.0
     def nodeBorderWidth:double 1.0
     def nodeShadow:boolean true
+    ; Box labels in bold: a slide's diagram is read from across a room
+    ; (`FlowStyle.labelBold`, CSS `node-font-weight: bold`).
+    def nodeBold:boolean false
 
     ; header strip of a compartment node
     def headerFill:string "#eef2f8"
