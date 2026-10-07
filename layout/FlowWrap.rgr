@@ -36,6 +36,11 @@
 ; to cross the gutter and the boxes on the far side, and on a slide it is
 ; lost between the columns. A flow with no such place is not wrapped.
 ;
+; A flow laid out left to right is cut the same way across: its ranks into
+; rows, one under the other (`applyAcross`). It is turned a quarter, cut into
+; columns and turned back, so a chain of seven steps on a wide slide is two
+; rows of large boxes, not one strip of small ones.
+;
 ; What it does not do: a graph with groups (subgraphs, clusters) is left
 ; alone, because a group's box would have to be cut too.
 ; ============================================================================
@@ -154,6 +159,9 @@ class FlowWrap {
     ; how many columns the last `split` filled: fewer than asked when the
     ; places it may cut are few
     def usedCols:int 1
+    ; the unit every gap is measured in, when the caller knows it better
+    ; than the boxes' heights do (a graph turned a quarter: `applyAcross`)
+    def unitGiven:double 0.0
 
     Constructor () {
         def a:[double]
@@ -389,6 +397,9 @@ class FlowWrap {
             return false
         }
         def u:double (FlowWrap.unit(g))
+        if (unitGiven > 0.0) {
+            u = unitGiven
+        }
         ; The gutter carries the edges between columns, and their names: it
         ; is at least as wide as the widest name plus room either side, so a
         ; name on a gutter run does not sit on a box. Rows get the same
@@ -430,6 +441,80 @@ class FlowWrap {
         columns = usedCols
         this.place(g rowOf u)
         return true
+    }
+
+    ; Wraps `g` the way its layout ran: a left-to-right flow into rows
+    ; (`applyAcross`), any other into columns (`apply`).
+    fn applyFlow:boolean (g:FlowGraph aspect:double minRows:int) {
+        if (g.flow == "LR") {
+            return (this.applyAcross(g aspect minRows))
+        }
+        return (this.apply(g aspect minRows))
+    }
+
+    ; A left-to-right flow cut into rows in a space of `aspect`: turned a
+    ; quarter (its ranks become rows), cut into columns, turned back. The
+    ; gaps are measured in the boxes' heights as they are drawn, the size
+    ; across the flow either way round.
+    fn applyAcross:boolean (g:FlowGraph aspect:double minRanks:int) {
+        if (aspect <= 0.0) {
+            return false
+        }
+        unitGiven = (FlowWrap.unit(g))
+        FlowWrap.turn(g)
+        def done:boolean (this.apply(g (1.0 / aspect) minRanks))
+        FlowWrap.turn(g)
+        unitGiven = 0.0
+        return done
+    }
+
+    ; The graph mirrored over its diagonal: x for y, width for height, and
+    ; each edge's route, lanes, label offset and sides with them (top for
+    ; left, right for bottom). Done twice it is the graph as it was.
+    sfn turn:void (g:FlowGraph) {
+        def n:int 0
+        while (n < (g.nodeCount())) {
+            def nd:FlowNode (g.nodeAt(n))
+            def x:double nd.x
+            nd.x = nd.y
+            nd.y = x
+            def w:double nd.width
+            nd.width = nd.height
+            nd.height = w
+            n = (n + 1)
+        }
+        def e:int 0
+        while (e < (g.edgeCount())) {
+            def ed:FlowEdge (g.edgeAt(e))
+            def q:int 0
+            while ((q + 1) < (array_length ed.waypoints)) {
+                def wx:double (itemAt ed.waypoints q)
+                set ed.waypoints q (itemAt ed.waypoints (q + 1))
+                set ed.waypoints (q + 1) wx
+                q = (q + 2)
+            }
+            def lx:double ed.laneX
+            ed.laneX = ed.laneY
+            ed.laneY = lx
+            def hx:boolean ed.hasLaneX
+            ed.hasLaneX = ed.hasLaneY
+            ed.hasLaneY = hx
+            def dx:double ed.labelDX
+            ed.labelDX = ed.labelDY
+            ed.labelDY = dx
+            ed.sourceHandle = (FlowWrap.turnedSide(ed.sourceHandle))
+            ed.targetHandle = (FlowWrap.turnedSide(ed.targetHandle))
+            e = (e + 1)
+        }
+    }
+
+    ; A side (0 top, 1 right, 2 bottom, 3 left; -1 none) after `turn`.
+    sfn turnedSide:int (s:int) {
+        if (s == 0) { return 3 }
+        if (s == 3) { return 0 }
+        if (s == 1) { return 2 }
+        if (s == 2) { return 1 }
+        return s
     }
 
     fn place:void (g:FlowGraph rowOf:[int] u:double) {

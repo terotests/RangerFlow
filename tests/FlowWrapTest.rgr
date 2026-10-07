@@ -226,10 +226,49 @@ class FlowWrapTest {
         this.ok(((c.centerX()) < ((b.centerX()) - 8.0)) "the box one way passes stands to one side")
     }
 
+    ; A left-to-right chain on a wide slide: cut into rows, read left to
+    ; right and then on the next row, every box as tall as it was, no line
+    ; through a box. One strip of seven was a row of tiny boxes.
+    fn rows:void () {
+        def text:string ("flowchart LR\n  L[Liidi] --> E[Ensikauppa] --> O[Onboarding] --> S[Säännöllinen asiakas]\n"
+            + "  S --> D{Summa ≥ 800?}\n  D -->|Kyllä| A[Avainasiakas]\n  D -->|Ei| K[Kasvuohjelma]\n")
+        def g:FlowGraph (FlowWrapTest.graphOf(text))
+        this.ok((g.flow == "LR") ("the layout says its direction: " + g.flow))
+        def w0:double (FlowWrapTest.width(g))
+        def h0:double (FlowWrapTest.height(g))
+        def boxH:double (g.nodeById("L")).height
+        def wrap (new FlowWrap())
+        this.ok((wrap.applyFlow(g 2.9 6)) "a long left-to-right chain on a wide slide is wrapped")
+        this.ok((wrap.columns == 2) ("into two rows: " + (to_string wrap.columns)))
+        def w1:double (FlowWrapTest.width(g))
+        def h1:double (FlowWrapTest.height(g))
+        this.ok(((w1 < w0) && (h1 > h0)) ("narrower and taller: " + (to_string w1) + "x" + (to_string h1) + " from " + (to_string w0) + "x" + (to_string h0)))
+        def l:FlowNode (g.nodeById("L"))
+        def o:FlowNode (g.nodeById("O"))
+        def s:FlowNode (g.nodeById("S"))
+        def d:FlowNode (g.nodeById("D"))
+        this.ok(((fabs ((l.centerY()) - (o.centerY()))) < 1.0) "the first steps are one row")
+        this.ok((s.y > (o.y + o.height)) "the next step starts the next row, under it")
+        this.ok((s.x < o.x) "…from the left")
+        this.ok((((fabs ((s.centerY()) - (d.centerY()))) < 1.0) && (d.x > s.x)) "…and the row goes on to the right")
+        this.ok(((fabs (l.height - boxH)) < 0.01) "a box keeps its size")
+        this.ok(((FlowWrapTest.overlaps(g)) == 0) "no two boxes overlap")
+        this.ok(((EdgeOverlap.nodeCrossings(g)) == 0) ("no line goes through a box: " + (to_string (EdgeOverlap.nodeCrossings(g)))))
+        ; a space as wide as the strip keeps it, and a top-to-bottom flow
+        ; still goes into columns
+        def g2:FlowGraph (FlowWrapTest.graphOf(text))
+        def narrow (new FlowWrap())
+        this.ok((! (narrow.applyFlow(g2 12.0 6))) "a space as wide as the strip keeps it")
+        def g3:FlowGraph (FlowWrapTest.graphOf((FlowWrapTest.chain())))
+        def tall (new FlowWrap())
+        this.ok(((tall.applyFlow(g3 1.5 6)) && (tall.columns >= 2)) "a top-to-bottom chain still goes into columns")
+    }
+
     sfn main:void () {
         def t (new FlowWrapTest())
         t.run()
         t.skipsKeepTheirLanes()
+        t.rows()
         print ((to_string t.passes) + " passed, " + (to_string t.fails) + " failed")
     }
 }

@@ -230,6 +230,7 @@ class LayeredLayout {
 
     fn run:void () {
         graph.reindex()
+        graph.flow = direction
         this.buildAdjacency()
         this.assignLayers()
         this.buildVertices()

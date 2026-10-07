@@ -1380,6 +1380,9 @@ class FlowGraph {
     ; Next generated id, so `addNode("" …)` and the connect gesture can both
     ; make one without colliding.
     def idSeq:int 1
+    ; The direction the layered layout last placed it in ("TB", "LR", …;
+    ; "" when no layered layout did): what a wrap cuts along (`FlowWrap`).
+    def flow:string ""
 
     Constructor () {
     }

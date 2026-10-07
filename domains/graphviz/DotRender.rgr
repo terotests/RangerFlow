@@ -101,7 +101,7 @@ class DotRender {
         }
         if (aspect > 0.0) {
             def wrap (new FlowWrap())
-            wrap.apply(drawing.graph aspect 6)
+            wrap.applyFlow(drawing.graph aspect 6)
         }
         def v:FlowView (FlowView.of(drawing.graph))
         v.notation = drawing.notation
