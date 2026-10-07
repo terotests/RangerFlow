@@ -7677,6 +7677,38 @@ class RangerFlowTest {
         def large:double (RangerFlowTest.largestText(big "node:A"))
         c.ok(("a slide sets a short label larger, " + (to_string small) + " -> " + (to_string large)) (large > (small * 1.3)))
         c.ok("but no larger than asked" (large <= ((small * 1.8) + 0.01)))
+        ; Bold labels (a slide's) are measured bold, so they still fit.
+        def bst:FlowStyle (FlowStyle.named("default"))
+        bst.textFill = 1.8
+        bst.labelBold = true
+        def bold:FlowScene (MermaidRender.sceneStyled("flowchart LR\n  A[Tarkista luottotiedot] --> B{Summa ≥ 800?}\n  B --> C[Avainasiakas]\n" bst 0.0 8.0))
+        def boldN:int 0
+        def thin:int 0
+        def wider:int 0
+        def bi:int 0
+        while (bi < (array_length bold.items)) {
+            def bt:SceneItem (itemAt bold.items bi)
+            if ((bt.kind == 1) && ((indexOf bt.tag "node:") == 0)) {
+                if bt.bold {
+                    boldN = (boldN + 1)
+                } {
+                    thin = (thin + 1)
+                }
+                def bj:int 0
+                while (bj < (array_length bold.items)) {
+                    def bb:SceneItem (itemAt bold.items bj)
+                    if ((bb.tag == bt.tag) && (bb.kind == 0)) {
+                        if (((bt.x < (bb.x - 0.5)) || ((bt.x + bt.w) > ((bb.x + bb.w) + 0.5)))) {
+                            wider = (wider + 1)
+                        }
+                    }
+                    bj = (bj + 1)
+                }
+            }
+            bi = (bi + 1)
+        }
+        c.ok(("labelBold sets the box labels bold: " + (to_string boldN)) ((boldN >= 3) && (thin == 0)))
+        c.eqInt("and each bold label stays inside its box" wider 0)
         ; ...and the gaps across the flow hold the larger "yes" (3 letters,
         ; 6.6 a letter at the sheet's size, 0.8 more of it): two gaps
         c.ok(("the boxes are where they were, the gaps grown at most by the larger label: " + (to_string sc.worldW) + " -> " + (to_string big.worldW)) ((big.worldW >= (sc.worldW - 0.5)) && (big.worldW <= ((sc.worldW + (2.0 * ((3.0 * 6.6) * 0.8))) + 0.5))))

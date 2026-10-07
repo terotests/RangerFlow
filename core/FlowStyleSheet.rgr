@@ -52,6 +52,9 @@ class FlowStyle {
     ; boxes have room for them (`FlowView.fillText`): 1 for a document, more
     ; for a slide, which is read from across a room.
     def textFill:double 1.0
+    ; Box labels set in bold (`FlowTheme.nodeBold`), measured bold too so
+    ; they still fit their boxes. On for a slide, like `textFill`.
+    def labelBold:boolean false
     ; The theme name, or a space-separated list of them — `EVGStyleSheet`
     ; takes several at once so a look and a place can be scoped separately.
     def theme:string ""
@@ -174,6 +177,9 @@ class FlowStyle {
     ; print and near-black on screen" is the same kind of decision as "a
     ; decision diamond is pale orange".
     fn applyToTheme:int (t:FlowTheme) {
+        if labelBold {
+            t.nodeBold = true
+        }
         def slot:int (this.planFor("canvas"))
         def count:int (sheet.planLength(slot))
         def i:int 0
@@ -394,6 +400,10 @@ class FlowStyle {
         }
         if (p == "node-border") {
             t.nodeBorder = col
+            return
+        }
+        if (p == "node-font-weight") {
+            t.nodeBold = ((value == "bold") || ((to_int (FlowStyle.lengthOf(value 400.0))) >= 600))
             return
         }
         if (p == "node-color") {
