@@ -276,7 +276,7 @@ class ActivityDiagram {
     }
 
     fn textWidth:double (t:string size:double) {
-        return ((to_double (strlen t)) * (size * 0.58))
+        return ((to_double (char_length t)) * (size * 0.58))
     }
 
     ; A fork sends its outgoing flows straight down and a join takes its

@@ -45,6 +45,7 @@ Import "D2Model.rgr"
 Import "../../layout/LayeredLayout.rgr"
 Import "../../layout/EdgeLanes.rgr"
 Import "../../layout/OrthoRouter.rgr"
+Import "pkg:evg/EVGCodepoint.rgr"
 
 ; ---------------------------------------------------------------------------
 ; D2's twenty-five shapes, against the forty-odd outlines this library draws.
@@ -945,7 +946,8 @@ class D2Flow {
             } {
                 run = (run + 1)
             }
-            i = (i + 1)
+            ; a character at a time: on C++ the string is UTF-8 bytes
+            i = (i + (EVGCodepoint.unitsAt(t i)))
         }
         if (run > widest) {
             widest = run

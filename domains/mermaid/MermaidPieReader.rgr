@@ -247,7 +247,7 @@ class MermaidPieFlow {
             ; centres short names in the middle of nothing, and a column of
             ; text that starts in a different place on every row is a column
             ; nobody can read down.
-            def keyWidth:double (((to_double (strlen text)) * 7.0) + 24.0)
+            def keyWidth:double (((to_double (char_length text)) * 7.0) + 24.0)
             if (keyWidth < 90.0) { keyWidth = 90.0 }
             def name:FlowNode (FlowNode.create(("name-" + s2.id) text (legendX + 26.0) (y - 5.0)))
             name.nodeType = "legend"

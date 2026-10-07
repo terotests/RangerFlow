@@ -130,7 +130,7 @@ class FlowWrap {
         def i:int 0
         while (i < (g.edgeCount())) {
             def e:FlowEdge (g.edgeAt(i))
-            def est:double ((to_double (strlen e.label)) * 7.0)
+            def est:double ((to_double (char_length e.label)) * 7.0)
             if (est > w) {
                 w = est
             }

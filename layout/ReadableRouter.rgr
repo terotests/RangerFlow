@@ -41,6 +41,7 @@ Import "../core/EdgeRouter.rgr"
 Import "EdgeLanes.rgr"
 Import "OrthoRouter.rgr"
 Import "OrientedPorts.rgr"
+Import "pkg:evg/EVGCodepoint.rgr"
 
 class ReadableRouter {
     ; ------------------------------------------------------------- the rules
@@ -1760,7 +1761,8 @@ class ReadableRouter {
             } {
                 run = (run + 8.2)
             }
-            i = (i + 1)
+            ; a character at a time: on C++ the string is UTF-8 bytes
+            i = (i + (EVGCodepoint.unitsAt(text i)))
         }
         if (run > widest) { widest = run }
         return widest

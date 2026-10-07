@@ -345,7 +345,7 @@ class MermaidMindMapFlow {
             }
             n.cssClass = classes
             ; Sized from the text, the way every other domain here does it.
-            def chars:int (strlen m.label)
+            def chars:int (char_length m.label)
             def want:double (((to_double chars) * 7.6) + 34.0)
             if (want < 96.0) { want = 96.0 }
             if (want > 240.0) { want = 240.0 }

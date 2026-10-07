@@ -480,7 +480,7 @@ class MermaidKanbanFlow {
         if (perLine < 8.0) {
             perLine = 8.0
         }
-        def len:double (to_double (strlen text))
+        def len:double (to_double (char_length text))
         def n:int 1
         def acc:double perLine
         while (acc < len) {

@@ -647,7 +647,7 @@ class MermaidGanttFlow {
         ; The name outside the bar, where the bar is too short to hold it. The
         ; estimate is the one the other readers size boxes with; there is no
         ; font measurer this side of the view.
-        def need:double (((to_double (strlen t.name)) * 6.6) + 16.0)
+        def need:double (((to_double (char_length t.name)) * 6.6) + 16.0)
         if (need > n.width) {
             n.label = ""
             n.syncFromModel()
@@ -761,7 +761,7 @@ class MermaidGanttFlow {
         def i:int 0
         while (i < (array_length d.tasks)) {
             def t:MermaidGanttTask (itemAt d.tasks i)
-            def need:double (((to_double (strlen t.section)) * 7.0) + 30.0)
+            def need:double (((to_double (char_length t.section)) * 7.0) + 30.0)
             if (need > w) {
                 w = need
             }

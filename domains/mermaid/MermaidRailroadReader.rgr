@@ -724,7 +724,7 @@ class MermaidRailroadFlow {
             return b
         }
         if (MermaidRailroadFlow.isLeaf(n.kind)) {
-            def w:double (((to_double (strlen n.text)) * 7.4) + 34.0)
+            def w:double (((to_double (char_length n.text)) * 7.4) + 34.0)
             if (w < 66.0) {
                 w = 66.0
             }

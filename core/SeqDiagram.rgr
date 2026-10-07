@@ -934,7 +934,7 @@ class SeqDiagramFlow {
 
     ; ---------------------------------------------------------------- bits --
     sfn textWidth:double (t:string size:double) {
-        return ((to_double (strlen t)) * (size * 0.58))
+        return ((to_double (char_length t)) * (size * 0.58))
     }
 
     sfn lineCount:int (t:string) {
