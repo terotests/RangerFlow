@@ -369,10 +369,12 @@ class XStateRender {
     }
 
     ; For a room `maxWidth` wide and `maxWidth / aspect` high (a slide's):
-    ; laid out left to right and top to bottom, and the one that comes out
-    ; larger in the room is kept. A machine with a long nested branch is a
-    ; strip across the page one way and fills it the other. A statechart is
-    ; never cut into columns: a frame cut in two is two frames.
+    ; laid out left to right, as Stately draws, unless top to bottom comes
+    ; out clearly larger in the room (a quarter): a machine with a long
+    ; nested branch is a strip across the page one way and fills it the
+    ; other. Near equals stay across, so one machine drawn in two places
+    ; of a deck reads the same way round. A statechart is never cut into
+    ; columns: a frame cut in two is two frames.
     sfn sceneForRoom:FlowScene (text:string style:FlowStyle maxWidth:double padding:double aspect:double) {
         def m:XsMachine (XsMachine.parse(text))
         def across:MermaidDrawing (XStateRender.drawMachineAt(m style (new FlowLayoutMemo) "LR"))
@@ -383,7 +385,7 @@ class XStateRender {
         def a:FlowScene (MermaidRender.sceneOfDrawing(across style 0.0 padding 0.0))
         def b:FlowScene (MermaidRender.sceneOfDrawing(down style 0.0 padding 0.0))
         def roomH:double (maxWidth / aspect)
-        if ((XStateRender.fit(b maxWidth roomH)) > ((XStateRender.fit(a maxWidth roomH)) * 1.05)) {
+        if ((XStateRender.fit(b maxWidth roomH)) > ((XStateRender.fit(a maxWidth roomH)) * 1.25)) {
             return (MermaidRender.sceneOfDrawing(down style maxWidth padding 0.0))
         }
         return (MermaidRender.sceneOfDrawing(across style maxWidth padding 0.0))

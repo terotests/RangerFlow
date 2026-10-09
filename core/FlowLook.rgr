@@ -19,6 +19,8 @@
 ;               decision, start), from the outline the scene gave it
 ;   textOn      the text colour that reads on a fill (dark or light ink)
 ;   contrast    the WCAG contrast ratio, so a test can hold every look to it
+;   readableRamp a gradient fill and its ink, moved until the text reads
+;   framePart   how a frame round other boxes is drawn in the look
 ;   roundCorners a square route with its corners rounded, ends kept
 ;
 ; Each look has a light-ground and a dark-ground variant: the slide decides
@@ -399,6 +401,18 @@ class FlowLook {
     }
 
     ; ------------------------------------------------------------- reading --
+    ; How a frame round other boxes is drawn (a compound state, a group):
+    ; the ground showing through, a thin outline and its name in the line
+    ; colour and the lines' face. Filled like a box, it covered what it
+    ; holds: a romantic compound state was one black slab with the names of
+    ; its states in it and nothing else.
+    fn framePart:FlowLookPart () {
+        def p:FlowLookPart (FlowLookPart.of("keep" "" edgeColor 1.2))
+        p.text = labelText
+        p.face(labelFont labelBold labelItalic labelUpper)
+        return p
+    }
+
     fn partFor:FlowLookPart (kind:string) {
         if (kind == "round") {
             return round
@@ -766,6 +780,63 @@ class FlowLook {
             return (la / lb)
         }
         return (lb / la)
+    }
+
+    ; `a` taken `t` of the way to `b` (0 a, 1 b), as #rrggbb.
+    sfn mix:string (a:string b:string t:double) {
+        def ca:EVGColor (EVGColor.parse(a))
+        def cb:EVGColor (EVGColor.parse(b))
+        def r:int (FlowLook.byte(((to_double (ca.red())) + (((to_double (cb.red())) - (to_double (ca.red()))) * t))))
+        def g:int (FlowLook.byte(((to_double (ca.green())) + (((to_double (cb.green())) - (to_double (ca.green()))) * t))))
+        def bl:int (FlowLook.byte(((to_double (ca.blue())) + (((to_double (cb.blue())) - (to_double (ca.blue()))) * t))))
+        return ((EVGColor.rgb(r g bl)).toHexString())
+    }
+
+    sfn byte:int (v:double) {
+        def i:int (floor (v + 0.5))
+        if (i < 0) { return 0 }
+        if (i > 255) { return 255 }
+        return i
+    }
+
+    ; A box filled with a ramp from `top` to `bottom` and text on it: the
+    ; ink (dark or white) that reads worst-case best over the whole ramp,
+    ; and the ramp moved away from the ink (darker under white, lighter
+    ; under dark) until that worst case is `need` (4.5:1 for text). Back
+    ; as top, bottom, ink. A mid blue with white text was 3.5:1 at its
+    ; light end, which neither ink alone could fix.
+    sfn readableRamp:[string] (top:string bottom:string need:double) {
+        def dark:string "#1b1b1b"
+        def white:string "#ffffff"
+        def wDark:double (FlowLook.minD((FlowLook.contrast(top dark)) (FlowLook.contrast(bottom dark))))
+        def wWhite:double (FlowLook.minD((FlowLook.contrast(top white)) (FlowLook.contrast(bottom white))))
+        def ink:string white
+        def away:string "#000000"
+        if (wDark > wWhite) {
+            ink = dark
+            away = "#ffffff"
+        }
+        def t:string top
+        def b:string bottom
+        def step:int 0
+        while (step < 20) {
+            def worst:double (FlowLook.minD((FlowLook.contrast(t ink)) (FlowLook.contrast(b ink))))
+            if (worst >= need) {
+                return ([] _:string (t b ink))
+            }
+            step = (step + 1)
+            def k:double ((to_double step) * 0.05)
+            t = (FlowLook.mix(top away k))
+            b = (FlowLook.mix(bottom away k))
+        }
+        return ([] _:string (t b ink))
+    }
+
+    sfn minD:double (a:double b:double) {
+        if (a < b) {
+            return a
+        }
+        return b
     }
 
     ; Dark ink or white, whichever reads better on `fill`.

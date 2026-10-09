@@ -39,6 +39,7 @@ class XStateTest {
         this.drawing()
         this.edits()
         this.nested()
+        this.onSlide()
     }
 
     fn reading:void () {
@@ -304,6 +305,107 @@ class XStateTest {
             k = (k + 1)
         }
         this.ok(toFrame "BACK arrives at the parallel state's frame")
+    }
+
+    sfn cafe:string () {
+        return "{ \"id\": \"kahvila\", \"initial\": \"jonossa\", \"states\": {\n  \"jonossa\": { \"after\": { \"300000\": \"lahtee\" }, \"on\": { \"VUORO\": \"tilaa\" } },\n  \"tilaa\": { \"on\": { \"TILAA\": [ { \"target\": \"odottaa\", \"guard\": \"onRahaa\", \"actions\": [\"maksa\"] }, { \"target\": \"lahtee\" } ] } },\n  \"odottaa\": { \"entry\": [\"aloitaKeitto\"], \"on\": { \"VALMIS\": \"nauttii\" } },\n  \"nauttii\": { \"on\": { \"KUPPI_TYHJA\": [ { \"target\": \"tilaa\", \"guard\": \"haluaaLisaa\" }, { \"target\": \"lahtee\" } ] } },\n  \"lahtee\": { \"type\": \"final\" } } }"
+    }
+
+    sfn barista:string () {
+        return "{ \"id\": \"barista\", \"initial\": \"kiinni\", \"on\": { \"SAHKOKATKO\": \".kiinni\" }, \"states\": {\n  \"kiinni\": { \"on\": { \"AVAA\": \"auki\" } },\n  \"auki\": { \"type\": \"parallel\", \"on\": { \"SULJE\": \"kiinni\" }, \"states\": {\n    \"kone\": { \"initial\": \"lammittyy\", \"states\": { \"lammittyy\": { \"after\": { \"10000\": \"valmis\" } }, \"valmis\": { \"on\": { \"KEITA\": \"keittaa\" } }, \"keittaa\": { \"invoke\": { \"src\": \"uutaEspresso\", \"onDone\": \"valmis\" } } } },\n    \"kassa\": { \"initial\": \"vapaa\", \"states\": { \"vapaa\": { \"on\": { \"ASIAKAS\": \"palvelee\" } }, \"palvelee\": { \"exit\": \"kiitos\", \"on\": { \"MAKSETTU\": \"vapaa\" } } } } } } } }"
+    }
+
+    ; A slide's style: text grown into the room, the gaps closed up.
+    sfn slideStyle:FlowStyle () {
+        def st (new FlowStyle)
+        st.textFill = 2.4
+        st.labelFill = 1.8
+        st.spacing = 0.6
+        return st
+    }
+
+    ; The edge labels' boxes (x y w h runs).
+    sfn labelBoxes:[double] (sc:FlowScene) {
+        def out:[double]
+        def i:int 0
+        while (i < (array_length sc.items)) {
+            def it:SceneItem (itemAt sc.items i)
+            if ((it.kind == 0) && ((indexOf it.tag "edge:") == 0)) {
+                push out it.x
+                push out it.y
+                push out it.w
+                push out it.h
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+
+    ; Tero's test deck (2026-10-09): on a wide slide a six-state machine was
+    ; a strip of 3 px text, every gap as wide as the longest label.
+    fn onSlide:void () {
+        def st:FlowStyle (XStateTest.slideStyle())
+        def m:XsMachine (XsMachine.parse((XStateTest.cafe())))
+        def dr:MermaidDrawing (XStateRender.drawMachineAt(m st (new FlowLayoutMemo) "LR"))
+        def g:FlowGraph dr.graph
+        def dot:FlowNode (g.nodeAt(0))
+        def first:FlowNode (g.nodeAt(0))
+        def tilaa:FlowNode (g.nodeAt(0))
+        def odottaa:FlowNode (g.nodeAt(0))
+        def i:int 0
+        while (i < (g.nodeCount())) {
+            def n:FlowNode (g.nodeAt(i))
+            if (n.shape == "circle") { dot = n }
+            if (n.label == "jonossa") { first = n }
+            if (n.label == "tilaa") { tilaa = n }
+            if ((indexOf n.label "odottaa") == 0) { odottaa = n }
+            i = (i + 1)
+        }
+        def plainGap:double (first.x - (dot.x + dot.width))
+        def namedGap:double (odottaa.x - (tilaa.x + tilaa.width))
+        this.ok((plainGap < (namedGap * 0.6)) ("an unnamed arrow's gap is narrower than a named one's: " + (to_string plainGap) + " vs " + (to_string namedGap)))
+        def wide:FlowScene (XStateRender.sceneForRoom((XStateTest.cafe()) st 1322.0 10.0 7.2))
+        this.ok((wide.worldW > (wide.worldH * 4.0)) ("a wide room keeps it across: " + (to_string wide.worldW) + " x " + (to_string wide.worldH)))
+        this.ok((wide.worldH < 183.0) ("and it fits a strip 183 high at full width: " + (to_string wide.worldH)))
+        ; the edge labels, grown for the slide, clear of each other and
+        ; inside the picture
+        def sets:[FlowScene]
+        push sets wide
+        push sets (XStateRender.sceneForRoom("{ \"initial\": \"a\", \"states\": { \"a\": { \"on\": { \"MENE\": \"b\" }, \"always\": { \"target\": \"b\", \"guard\": \"heti\" } }, \"b\": { \"type\": \"final\" } } }" st 1322.0 10.0 7.9))
+        def si:int 0
+        while (si < (array_length sets)) {
+            def sc:FlowScene (itemAt sets si)
+            def bx:[double] (XStateTest.labelBoxes(sc))
+            def nb:int (idiv (array_length bx) 4)
+            def clash:int 0
+            def outside:int 0
+            def a:int 0
+            while (a < nb) {
+                def ax:double (itemAt bx (a * 4))
+                def ay:double (itemAt bx ((a * 4) + 1))
+                def aw:double (itemAt bx ((a * 4) + 2))
+                def ah:double (itemAt bx ((a * 4) + 3))
+                if ((((ax < -0.5) || (ay < -0.5)) || ((ax + aw) > (sc.worldW + 0.5))) || ((ay + ah) > (sc.worldH + 0.5))) {
+                    outside = (outside + 1)
+                }
+                def b:int (a + 1)
+                while (b < nb) {
+                    if (FlowView.boxesMeet(ax ay aw ah (itemAt bx (b * 4)) (itemAt bx ((b * 4) + 1)) (itemAt bx ((b * 4) + 2)) (itemAt bx ((b * 4) + 3)))) {
+                        clash = (clash + 1)
+                    }
+                    b = (b + 1)
+                }
+                a = (a + 1)
+            }
+            this.ok((nb >= 2) ("scene " + (to_string si) + " has its edge labels: " + (to_string nb)))
+            this.ok((clash == 0) ("scene " + (to_string si) + ": no edge label over another, got " + (to_string clash)))
+            this.ok((outside == 0) ("scene " + (to_string si) + ": every edge label inside the picture, got " + (to_string outside) + " outside"))
+            si = (si + 1)
+        }
+        ; one machine, two rooms of a deck: the same way round
+        def tall:FlowScene (XStateRender.sceneForRoom((XStateTest.barista()) st 1322.0 10.0 1.93))
+        def flat:FlowScene (XStateRender.sceneForRoom((XStateTest.barista()) st 1322.0 10.0 4.3))
+        this.ok(((tall.worldW > tall.worldH) && (flat.worldW > flat.worldH)) ("the parallel machine is across in both rooms: " + (to_string tall.worldW) + "x" + (to_string tall.worldH) + ", " + (to_string flat.worldW) + "x" + (to_string flat.worldH)))
     }
 
     sfn to:string (s:XsState i:int) {

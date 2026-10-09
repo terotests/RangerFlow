@@ -1214,6 +1214,26 @@ class FlowView {
             r.w = 200.0
             r.h = 200.0
         }
+        ; the edge labels as drawn, grown by `fillText`: a label set above
+        ; the topmost line grew past the bounds the model knew and was cut
+        viewport.zoom = 1.0
+        viewport.x = 0.0
+        viewport.y = 0.0
+        def lb:[double] (this.edgeLabelBoxes(1.0 labelGrow))
+        def b:int 0
+        while ((b + 3) < (array_length lb)) {
+            def bx:double (itemAt lb b)
+            def by:double (itemAt lb (b + 1))
+            def x2:double ((r.x + r.w))
+            def y2:double ((r.y + r.h))
+            if (bx < r.x) { r.x = bx }
+            if (by < r.y) { r.y = by }
+            if ((bx + (itemAt lb (b + 2))) > x2) { x2 = (bx + (itemAt lb (b + 2))) }
+            if ((by + (itemAt lb (b + 3))) > y2) { y2 = (by + (itemAt lb (b + 3))) }
+            r.w = (x2 - r.x)
+            r.h = (y2 - r.y)
+            b = (b + 4)
+        }
         r.grow(padding)
         viewport.zoom = 1.0
         viewport.x = (0.0 - r.x)
@@ -1594,6 +1614,93 @@ class FlowView {
         }
     }
 
+    ; Where an edge's label is drawn at `grow` times the size it was placed
+    ; for, its text laid out as `lay`: centre x, centre y, width, height. A
+    ; label set beside its line (a sequence message's, above it) keeps its
+    ; near edge where it was and grows away from the line, instead of
+    ; growing over it.
+    fn edgeLabelPlace:[double] (e:FlowEdge path:EdgePath lay:FlowTextLayout grow:double) {
+        def mx:double (this.sx(((path.midX()) + e.labelDX)))
+        def my:double (this.sy(((path.midY()) + e.labelDY)))
+        def pad:double (this.hair(4.0))
+        def bw:double (lay.width + (pad * 2.0))
+        def bh:double (lay.height + pad)
+        if (grow > 1.0) {
+            def keep:double (1.0 - (1.0 / grow))
+            if (e.labelDY < 0.0) { my = (my - ((bh * keep) * 0.5)) }
+            if (e.labelDY > 0.0) { my = (my + ((bh * keep) * 0.5)) }
+            if (e.labelDX < 0.0) { mx = (mx - ((bw * keep) * 0.5)) }
+            if (e.labelDX > 0.0) { mx = (mx + ((bw * keep) * 0.5)) }
+        }
+        return ([] _:double (mx my bw bh))
+    }
+
+    ; The boxes the edge labels are drawn in, as x y w h runs in the view's
+    ; coordinates: set at `scale` times the theme's label size, placed as
+    ; labels grown `grow` times the size they were placed for.
+    fn edgeLabelBoxes:[double] (scale:double grow:double) {
+        def boxes:[double]
+        def k:int 0
+        while (k < (graph.edgeCount())) {
+            def e:FlowEdge (graph.edgeAt(k))
+            if ((strlen e.label) > 0) {
+                def path:EdgePath (EdgeRouter.route(graph e))
+                path.flatten(12)
+                def size:double (this.sl((theme.labelFontSize * scale)))
+                def lay:FlowTextLayout (this.layoutText(e.label size (this.sl(160.0)) 0.0 2))
+                def at:[double] (this.edgeLabelPlace(e path lay grow))
+                push boxes ((itemAt at 0) - ((itemAt at 2) * 0.5))
+                push boxes ((itemAt at 1) - ((itemAt at 3) * 0.5))
+                push boxes (itemAt at 2)
+                push boxes (itemAt at 3)
+            }
+            k = (k + 1)
+        }
+        return boxes
+    }
+
+    ; How many pairs of edge labels, and of an edge label and a box, overlap
+    ; when the labels are `grow` times their size.
+    fn edgeLabelClashes:int (grow:double) {
+        def boxes:[double] (this.edgeLabelBoxes(grow grow))
+        def count:int 0
+        def nb:int (idiv (array_length boxes) 4)
+        def a:int 0
+        while (a < nb) {
+            def ax:double (itemAt boxes (a * 4))
+            def ay:double (itemAt boxes ((a * 4) + 1))
+            def aw:double (itemAt boxes ((a * 4) + 2))
+            def ah:double (itemAt boxes ((a * 4) + 3))
+            def b:int (a + 1)
+            while (b < nb) {
+                if (FlowView.boxesMeet(ax ay aw ah (itemAt boxes (b * 4)) (itemAt boxes ((b * 4) + 1)) (itemAt boxes ((b * 4) + 2)) (itemAt boxes ((b * 4) + 3)))) {
+                    count = (count + 1)
+                }
+                b = (b + 1)
+            }
+            def i:int 0
+            while (i < (graph.nodeCount())) {
+                def n:FlowNode (graph.nodeAt(i))
+                if ((n.hidden == false) && (n.nodeType != "group")) {
+                    if (FlowView.boxesMeet(ax ay aw ah (this.sx(n.x)) (this.sy(n.y)) (this.sl(n.width)) (this.sl(n.height)))) {
+                        count = (count + 1)
+                    }
+                }
+                i = (i + 1)
+            }
+            a = (a + 1)
+        }
+        return count
+    }
+
+    sfn boxesMeet:boolean (ax:double ay:double aw:double ah:double bx:double by:double bw:double bh:double) {
+        if ((ax + aw) <= bx) { return false }
+        if ((bx + bw) <= ax) { return false }
+        if ((ay + ah) <= by) { return false }
+        if ((by + bh) <= ay) { return false }
+        return true
+    }
+
     fn paintEdgeLabel:void (sc:FlowScene e:FlowEdge path:EdgePath) {
         def size:double (this.sl(theme.labelFontSize))
         ; The same floor the node labels use. They disagreed for no reason
@@ -1609,22 +1716,12 @@ class FlowView {
         ; allowed a second one — "changes requested" reads better stacked than
         ; strung across three nodes.
         def lay:FlowTextLayout (this.layoutText(raw size (this.sl(160.0)) 0.0 2))
-        def mx:double (this.sx(((path.midX()) + e.labelDX)))
-        def my:double (this.sy(((path.midY()) + e.labelDY)))
-        def pad:double (this.hair(4.0))
-        def bw:double (lay.width + (pad * 2.0))
-        def bh:double (lay.height + pad)
-        ; A label set beside its line (a sequence message's, above it) was
-        ; placed for the size the model knew. Grown by `fillText`, it keeps
-        ; its near edge where it was and grows away from the line, instead of
-        ; growing over it.
-        if (labelGrow > 1.0) {
-            def keep:double (1.0 - (1.0 / labelGrow))
-            if (e.labelDY < 0.0) { my = (my - ((bh * keep) * 0.5)) }
-            if (e.labelDY > 0.0) { my = (my + ((bh * keep) * 0.5)) }
-            if (e.labelDX < 0.0) { mx = (mx - ((bw * keep) * 0.5)) }
-            if (e.labelDX > 0.0) { mx = (mx + ((bw * keep) * 0.5)) }
-        }
+        ; placed for the size the model knew, grown by `fillText`
+        def at:[double] (this.edgeLabelPlace(e path lay labelGrow))
+        def mx:double (itemAt at 0)
+        def my:double (itemAt at 1)
+        def bw:double (itemAt at 2)
+        def bh:double (itemAt at 3)
         def fill:string theme.edgeLabelFill
         if (this.isEditing(tag)) {
             fill = theme.editFill
@@ -2246,6 +2343,18 @@ class FlowView {
         }
         if (lk < 1.0) {
             lk = k
+        }
+        ; The edge labels were placed for their own size: grown, they stay
+        ; clear of each other and of the boxes, or grow less (a statechart
+        ; whose gaps are as wide as its labels had them set over each other).
+        if (lk > 1.0) {
+            def clash:int (this.edgeLabelClashes(1.0))
+            while ((lk > 1.0) && ((this.edgeLabelClashes(lk)) > clash)) {
+                lk = (lk - 0.05)
+            }
+            if (lk < 1.0) {
+                lk = 1.0
+            }
         }
         theme.headerFontSize = (theme.headerFontSize * k)
         theme.labelFontSize = (theme.labelFontSize * lk)

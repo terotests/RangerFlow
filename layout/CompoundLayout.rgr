@@ -333,6 +333,13 @@ class CompoundLayout {
                 if (labelsSetGap && (lay.layerGap < lay.minLayerGap)) {
                     lay.layerGap = lay.minLayerGap
                 }
+                ; a statechart: each gap as wide as the label it holds
+                if labelsSetGap {
+                    lay.labelGaps = true
+                    lay.labelGapFloor = (CompoundLayout.floorOf((minLayerGapLR * spacing)))
+                    lay.labelCharW = (6.6 * labelScale)
+                    lay.labelAlongMost = 160.0
+                }
             }
         } {
             lay.direction = "TB"
