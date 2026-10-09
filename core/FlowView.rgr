@@ -2181,8 +2181,16 @@ class FlowView {
             def asked:boolean true
             if n.hidden { asked = false }
             if (n.nodeType == "group") { asked = false }
-            if ((n.sectionCount()) > 0) { asked = false }
             if ((strlen (trim n.label)) == 0) { asked = false }
+            ; a class or table: its name is one line in the header band, cut
+            ; with "…" when wider (paintCompartmentBody); grown with the
+            ; others it has to stay whole and inside the band
+            if (asked && ((n.sectionCount()) > 0)) {
+                if ((this.headerFitsAt(n k)) == false) {
+                    return false
+                }
+                asked = false
+            }
             if asked {
                 def plain:boolean ((this.shapeLabelled(n)) == false)
                 def size:double (this.sl((theme.headerFontSize * k)))
@@ -2207,6 +2215,17 @@ class FlowView {
             i = (i + 1)
         }
         return true
+    }
+
+    ; A compartment node's name at `k` times the header size: on one line
+    ; inside the header's padding, and no taller than the header band.
+    fn headerFitsAt:boolean (n:FlowNode k:double) {
+        def size:double (this.sl((theme.headerFontSize * k)))
+        def room:double ((this.sl(n.width)) - ((this.sl(8.0)) * 2.0))
+        if ((this.textWidthBold((trim n.label) size true)) > room) {
+            return false
+        }
+        return ((size * 1.2) <= (this.sl(n.headerHeight)))
     }
 
     ; Set the labels as large as `textRoom` allows; the edge labels grow by
