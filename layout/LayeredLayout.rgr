@@ -126,6 +126,20 @@ class LayeredLayout {
     def squareUp:boolean false
     def squareRatio:double 1.5
     def minLayerGap:double 56.0
+    ; Each gap sized for what it holds rather than all of them for the
+    ; longest label: a statechart across the page, where most arrows are
+    ; named, was as wide as five gaps of its longest label, an unnamed
+    ; arrow from the start dot included. On, a gap is `labelGapFloor`, or
+    ; the tracks its corridor turns in, or the label it holds: an arrow
+    ; between neighbouring layers puts its name in their gap, a longer one
+    ; in the narrowest gap it crosses. A label is `labelCharW` a character along
+    ; the flow, at most `labelAlongMost` (it takes a second line after
+    ; that), and `labelGapPad` for the stubs and the arrowhead.
+    def labelGaps:boolean false
+    def labelGapFloor:double 56.0
+    def labelCharW:double 6.6
+    def labelAlongMost:double 160.0
+    def labelGapPad:double 48.0
     ; Packing each layer and centring it on the widest one puts a chain of
     ; five nodes that hangs off the first node of a row in the middle of the
     ; page, under the third. With this on, every vertex is then moved
@@ -295,6 +309,10 @@ class LayeredLayout {
         if (layerGap <= minLayerGap) {
             return false
         }
+        ; each gap is already what it holds (`labelGaps`)
+        if labelGaps {
+            return false
+        }
         def along:double (this.extentAlong())
         def across:double (this.extentAcross())
         def want:double (across * squareRatio)
@@ -315,6 +333,126 @@ class LayeredLayout {
         }
         layerGap = narrower
         return true
+    }
+
+    ; The gap after each layer but the last: `layerGap` each, or with
+    ; `labelGaps` what each one holds.
+    fn layerGaps:[double] () {
+        def lc:int (this.layerCount())
+        def out:[double]
+        def i:int 0
+        while ((i + 1) < lc) {
+            push out layerGap
+            i = (i + 1)
+        }
+        if ((labelGaps == false) || (lc < 2)) {
+            return out
+        }
+        def tracks:[int] (this.corridorCounts())
+        def g:int 0
+        while (g < (array_length out)) {
+            def need:double labelGapFloor
+            def busy:int (itemAt tracks g)
+            if (busy < 1) {
+                busy = 1
+            }
+            def lanes:double (56.0 + ((to_double (busy - 1)) * 14.0))
+            if (lanes > need) {
+                need = lanes
+            }
+            set_at out g need
+            g = (g + 1)
+        }
+        ; between neighbours first: the name has no other gap to go in
+        def pass:int 0
+        while (pass < 2) {
+            def k:int 0
+            while (k < (graph.edgeCount())) {
+                def e:FlowEdge (graph.edgeAt(k))
+                if ((((strlen e.label) > 0) && (e.sourceIndex >= 0)) && (e.targetIndex >= 0)) {
+                    def la:int (itemAt layerOf e.sourceIndex)
+                    def lb:int (itemAt layerOf e.targetIndex)
+                    def lo:int la
+                    def hi:int lb
+                    if (lb < la) {
+                        lo = lb
+                        hi = la
+                    }
+                    def span:int (hi - lo)
+                    if (((pass == 0) && (span == 1)) || ((pass == 1) && (span > 1))) {
+                        def along:double ((to_double (char_length e.label)) * labelCharW)
+                        if (along > labelAlongMost) {
+                            along = labelAlongMost
+                        }
+                        def room:double (along + labelGapPad)
+                        ; a longer arrow's name goes where it costs least:
+                        ; the gap it crosses that is narrowest so far, the
+                        ; middle one of equals
+                        def at:int lo
+                        if (span > 1) {
+                            def mid:double ((to_double (lo + hi)) * 0.5)
+                            def bestW:double 1000000000.0
+                            def g2:int lo
+                            while (g2 < hi) {
+                                def wg:double (itemAt out g2)
+                                if (room > wg) {
+                                    wg = room
+                                }
+                                def nearer:boolean ((fabs (((to_double g2) + 0.5) - mid)) < (fabs (((to_double at) + 0.5) - mid)))
+                                if ((wg < (bestW - 0.5)) || (((fabs (wg - bestW)) <= 0.5) && nearer)) {
+                                    bestW = wg
+                                    at = g2
+                                }
+                                g2 = (g2 + 1)
+                            }
+                        }
+                        if ((at < (array_length out)) && (room > (itemAt out at))) {
+                            set_at out at room
+                        }
+                    }
+                }
+                k = (k + 1)
+            }
+            pass = (pass + 1)
+        }
+        return out
+    }
+
+    ; Per gap, the edges that turn in it (`corridorNeed`'s count).
+    fn corridorCounts:[int] () {
+        def lc:int (this.layerCount())
+        def count:[int]
+        def i:int 0
+        while (i < lc) {
+            push count 0
+            i = (i + 1)
+        }
+        def k:int 0
+        while (k < (graph.edgeCount())) {
+            def e:FlowEdge (graph.edgeAt(k))
+            if ((e.sourceIndex >= 0) && (e.targetIndex >= 0)) {
+                def la:int (itemAt layerOf e.sourceIndex)
+                def lb:int (itemAt layerOf e.targetIndex)
+                def lo:int la
+                def hi:int lb
+                if (lb < la) {
+                    lo = lb
+                    hi = la
+                }
+                if (hi > lo) {
+                    if ((hi - lo) > 1) {
+                        set_at count lo ((itemAt count lo) + 1)
+                        set_at count (hi - 1) ((itemAt count (hi - 1)) + 1)
+                    } {
+                        if ((this.canBeStraight(e)) == false) {
+                            set_at count lo ((itemAt count lo) + 1)
+                        }
+                    }
+                }
+            }
+            k = (k + 1)
+        }
+        return count
     }
 
     ; The gap the busiest corridor needs: two stubs, a margin inside each,
@@ -2336,11 +2474,16 @@ class LayeredLayout {
             push cursor ((widest - ex2) * 0.5)
             c = (c + 1)
         }
+        def gaps:[double] (this.layerGaps())
         def acc:double 0.0
         def m:int 0
         while (m < lc) {
             set_at layerMain m acc
-            acc = ((acc + (itemAt layerDepth m)) + layerGap)
+            def gapM:double layerGap
+            if (m < (array_length gaps)) {
+                gapM = (itemAt gaps m)
+            }
+            acc = ((acc + (itemAt layerDepth m)) + gapM)
             m = (m + 1)
         }
         ; Place in (layer, order) sequence so the packing follows the ordering.

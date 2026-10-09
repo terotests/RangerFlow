@@ -236,8 +236,28 @@ class FlowLookTest {
         def jur:FlowLook (FlowLook.jurassic(true))
         this.ok(((jur.partFor("round")).form == "circle") "jurassic draws round nodes as circles")
         this.ok(((jur.fillOf("decision" 3)) == "#cfcfcf") "jurassic's questions are grey")
+        ; holo's mid blue, light at the top and deeper below: neither ink
+        ; read over all of it
+        def ramp:[string] (FlowLook.readableRamp("#468ccc" "#2f6aa8" 4.5))
+        def worst:double (FlowLook.minD((FlowLook.contrast((itemAt ramp 0) (itemAt ramp 2))) (FlowLook.contrast((itemAt ramp 1) (itemAt ramp 2)))))
+        this.ok((worst >= 4.5) ("the ramp is moved until its text reads: " + (join ramp " ") + " " + (to_string worst)))
+        def kept:[string] (FlowLook.readableRamp("#1e3a8a" "#172554" 4.5))
+        this.ok((((itemAt kept 0) == "#1e3a8a") && ((itemAt kept 2) == "#ffffff")) ("a dark ramp is kept, white on it: " + (join kept " ")))
+        def pale:[string] (FlowLook.readableRamp("#dbeafe" "#bfdbfe" 4.5))
+        this.ok((((itemAt pale 0) == "#dbeafe") && ((itemAt pale 2) == "#1b1b1b")) ("a pale one too, dark ink on it: " + (join pale " ")))
+        this.ok(((FlowLook.mix("#000000" "#ffffff" 0.5)) == "#808080") ("mix halfway: " + (FlowLook.mix("#000000" "#ffffff" 0.5))))
         def rom:FlowLook (FlowLook.romantic(true))
         this.ok((rom.edgeDash > 0.0) "romantic lines are dashed")
+        ; a frame shows what it holds: no fill, the line colour, in every look
+        def all:[string] (strsplit (FlowLook.names()) " ")
+        def fi:int 0
+        while (fi < (array_length all)) {
+            def lk:FlowLook (FlowLook.named((itemAt all fi) true))
+            def fp:FlowLookPart (lk.framePart())
+            this.ok((((strlen fp.fill) == 0) && (fp.stroke == lk.edgeColor)) ((itemAt all fi) + ": a frame is an outline, not a fill"))
+            this.ok(((FlowLook.contrast(fp.text "#ffffff")) >= 4.5) ((itemAt all fi) + ": a frame's name reads on the light ground"))
+            fi = (fi + 1)
+        }
         this.ok(((rom.partFor("round")).italic) "romantic circles are italic")
     }
 
