@@ -355,7 +355,7 @@ class XsMachine {
     }
 
     ; ---------------------------------------------------------------- read --
-    sfn join:string (parent:string k:string) {
+    sfn pathOf:string (parent:string k:string) {
         if ((strlen parent) == 0) {
             return k
         }
@@ -483,7 +483,7 @@ class XsMachine {
                 while (k < (kids.count())) {
                     def c (new XsState)
                     c.key = (kids.keyAt(k))
-                    c.path = (XsMachine.join(st.path c.key))
+                    c.path = (XsMachine.pathOf(st.path c.key))
                     c.parent = st.path
                     c.depth = (st.depth + 1)
                     push st.children c
@@ -633,7 +633,7 @@ class XsMachine {
     ; `a.b.c` walked down from `base`, a key at a time. Keys may hold
     ; spaces; a key holding a dot is matched whole before it is split.
     fn descend:string (base:string rel:string) {
-        def whole:string (XsMachine.join(base rel))
+        def whole:string (XsMachine.pathOf(base rel))
         if (this.hasState(whole)) {
             return whole
         }
@@ -641,7 +641,7 @@ class XsMachine {
         def here:string base
         def i:int 0
         while (i < (array_length parts)) {
-            def next:string (XsMachine.join(here (itemAt parts i)))
+            def next:string (XsMachine.pathOf(here (itemAt parts i)))
             if ((this.hasState(next)) == false) {
                 return "?"
             }

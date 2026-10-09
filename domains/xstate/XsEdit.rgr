@@ -328,7 +328,7 @@ class XsEdit {
         def i:int 0
         while (i < (array_length parts)) {
             def seg:string (itemAt parts i)
-            def next:string (XsMachine.join(here seg))
+            def next:string (XsMachine.pathOf(here seg))
             if ((next == renamed) && (seg == oldKey)) {
                 push out newKey
                 changed = true
