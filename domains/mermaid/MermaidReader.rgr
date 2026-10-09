@@ -344,6 +344,10 @@ class MermaidDiagram {
     def errorLine:int 0
 
     def subgraphs:[MermaidSubgraph]
+    ; Lay the gaps out for the labels from the start (`CompoundLayout.
+    ; labelsSetGap`). Mermaid text never asks; a statechart described as a
+    ; MermaidDiagram (`domains/xstate`) does, because all its arrows are named.
+    def labelsSetGap:boolean false
 
     Constructor () {
     }
@@ -479,8 +483,16 @@ class MermaidDiagram {
             if ((this.indexOfStep(m)) >= 0) {
                 push out m
             } {
-                if ((this.indexOfSubgraph(m)) >= 0) {
-                    this.membersInto(m out)
+                ; a nested group is listed by its FRAME's id (`sg-` + its
+                ; own), which is what its parent's frame measures
+                def inner:string m
+                if ((this.indexOfSubgraph(inner)) < 0) {
+                    if (((strlen m) > 3) && ((substring m 0 3) == "sg-")) {
+                        inner = (substring m 3 (strlen m))
+                    }
+                }
+                if ((this.indexOfSubgraph(inner)) >= 0) {
+                    this.membersInto(inner out)
                 }
             }
             i = (i + 1)
@@ -3098,6 +3110,13 @@ class MermaidFlow {
     ; The same, with orders found before kept in `memo` — see `LayoutMemo`.
     sfn styledWith:FlowGraph (d:MermaidDiagram style:FlowStyle memo:FlowLayoutMemo) {
         def g:FlowGraph (d.buildStyled(style))
+        return (MermaidFlow.laidOut(d g style memo))
+    }
+
+    ; The second half of `styledWith`: a built graph laid out, framed and
+    ; routed. Apart so a domain that builds its diagram as a MermaidDiagram
+    ; (XState, `domains/xstate`) can size its own nodes in between.
+    sfn laidOut:FlowGraph (d:MermaidDiagram g:FlowGraph style:FlowStyle memo:FlowLayoutMemo) {
         ; The subgraphs are laid out from the inside out — each group on its
         ; own, then as one box in its parent's layout — so a frame is as
         ; small as what it holds and never over another. With no subgraphs
@@ -3112,6 +3131,14 @@ class MermaidFlow {
         cl.memo = memo
         if (style.textFill > 1.0) {
             cl.labelScale = style.textFill
+        }
+        if d.labelsSetGap {
+            cl.labelsSetGap = true
+            ; the most a line's name grows on a slide, not a box's text
+            cl.labelScale = (style.labelMost())
+            if (cl.labelScale < 1.0) {
+                cl.labelScale = 1.0
+            }
         }
         cl.spacing = style.spacing
         d.describeGroups(cl g)

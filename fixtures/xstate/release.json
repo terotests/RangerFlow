@@ -1,0 +1,36 @@
+{
+  "id": "release",
+  "initial": "planning",
+  "on": { "CANCEL": ".cancelled" },
+  "states": {
+    "planning": { "on": { "START": "development" } },
+    "development": {
+      "type": "parallel",
+      "states": {
+        "code": {
+          "initial": "writing",
+          "states": {
+            "writing": { "on": { "PUSH": "review" } },
+            "review": { "on": { "APPROVE": "merged", "CHANGES": "writing" } },
+            "merged": { "type": "final" }
+          }
+        },
+        "docs": {
+          "initial": "draft",
+          "states": {
+            "draft": { "on": { "PUBLISH": "published" } },
+            "published": { "type": "final" }
+          }
+        }
+      },
+      "onDone": "testing"
+    },
+    "testing": {
+      "invoke": { "src": "runSuite", "onDone": "release", "onError": "development" },
+      "after": { "86400000": { "target": "development", "actions": "escalate" } },
+      "on": { "COMMENT": { "actions": "log" } }
+    },
+    "release": { "type": "final" },
+    "cancelled": { "type": "final" }
+  }
+}

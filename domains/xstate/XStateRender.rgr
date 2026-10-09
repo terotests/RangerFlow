@@ -1,0 +1,405 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ============================================================================
+; XStateRender.rgr — an XState machine config, drawn as a statechart.
+; ============================================================================
+;
+;   ```xstate                       ●─►┌───────┐  SUBMIT  ┌─────────┐
+;   { "initial": "draft",              │ draft ├─────────►│ testing │
+;     "states": { … } }                └───────┘◄─────────┤ entry / │
+;   ```                                   REJECT / addComment└────┬────┘
+;                                                         ACCEPT [role:tester]
+;                                                                 ▼
+;                                                           ╔══════════╗
+;                                                           ║ accepted ║
+;                                                           ╚══════════╝
+;
+; The machine is read into the IR (`XsMachine`) and the IR is described to
+; the flowchart pipeline as a `MermaidDiagram` — not as Mermaid TEXT: the
+; nodes, links and groups are made directly — because that pipeline already
+; does everything a statechart needs drawn: groups laid out from the inside
+; out (a compound state is a frame), arrows to a frame (a transition on a
+; parent state leaves from its border), labels placed clear of lines, and
+; every look Sliqtly paints a flowchart in.
+;
+; What a statechart adds, and where it goes:
+;
+;   initial state    a small dot with an arrow into the state, per level
+;   compound state   a frame titled with its name, its states inside
+;   parallel state   a frame of frames, the regions dashed
+;   final state      a box with a heavy outline
+;   history state    a circle with H or H*
+;   transition       `event [guard] / action` on the arrow; alternatives of
+;                    one event numbered in the order they are tried, the
+;                    unguarded last one `[else]` (Stately's 1 IF … / 2 ELSE)
+;   no target        a row in the state's box: `event / action`
+;   entry / exit     rows in the box: `entry / notify`
+;   machine `on`     arrows from a dashed box called "any state"
+;
+; Read left to right, as Stately draws: a machine has few states and many
+; transitions back, and back-edges need room beside the flow.
+; ============================================================================
+
+Import "XsMachine.rgr"
+Import "../mermaid/MermaidRender.rgr"
+
+class XStateDrawing {
+    def machine:XsMachine (new XsMachine)
+    def diagram:MermaidDiagram (new MermaidDiagram)
+    ; state path -> node id (a box) or group id (a frame)
+    def paths:[string]
+    def ids:[string]
+    def groupIds:[string]
+    def initialIds:[string]
+    def finalIds:[string]
+    def regionIds:[string]
+    def anyIds:[string]
+
+    Constructor () {
+    }
+
+    fn idOf:string (path:string) {
+        def i:int 0
+        while (i < (array_length paths)) {
+            if ((itemAt paths i) == path) {
+                return (itemAt ids i)
+            }
+            i = (i + 1)
+        }
+        return ""
+    }
+}
+
+class XStateRender {
+
+    ; Whether a text is an XState config this draws: its refusal is "".
+    sfn refusal:string (text:string) {
+        def m:XsMachine (XsMachine.parse(text))
+        return (m.refusal())
+    }
+
+    ; What the machine gets wrong, as sentences: "testing: GO: no state
+    ; \"nowhere\"". Drawn all the same; these say what is missing.
+    sfn warnings:[string] (text:string) {
+        def out:[string]
+        def m:XsMachine (XsMachine.parse(text))
+        def i:int 0
+        while (i < (array_length m.issues)) {
+            def x:XsIssue (itemAt m.issues i)
+            push out (x.path + ": " + x.message)
+            i = (i + 1)
+        }
+        return out
+    }
+
+    ; The node or frame id of the state at index `i` of `machine.states`.
+    sfn idFor:string (i:int) {
+        return ("x" + (to_string i))
+    }
+
+    ; The IR, described as a MermaidDiagram.
+    sfn describe:XStateDrawing (m:XsMachine direction:string) {
+        def out (new XStateDrawing)
+        out.machine = m
+        def d:MermaidDiagram out.diagram
+        d.diagramKind = "flowchart"
+        d.direction = direction
+        d.labelsSetGap = true
+        d.title = m.id
+        ; ids first: a transition may name a state written after it
+        def i:int 0
+        while (i < (array_length m.states)) {
+            def s:XsState (itemAt m.states i)
+            push out.paths s.path
+            push out.ids (XStateRender.idFor(i))
+            i = (i + 1)
+        }
+        XStateRender.describeChildren(out m.root false)
+        ; The machine's own `on` is taken from whichever state the machine
+        ; is in. A frame round the whole picture says that and draws badly:
+        ; every such arrow leaves the outer border to come back inside. So
+        ; it leaves a box of its own, dashed, called "any state".
+        if ((array_length m.root.transitions) > 0) {
+            def anyId:string (XStateRender.idFor(0))
+            def an:FlowStep (d.ensureStep(anyId))
+            an.label = "any state"
+            d.setShape(anyId "round")
+            push out.anyIds anyId
+        }
+        ; the transitions
+        def k:int 0
+        while (k < (array_length m.states)) {
+            def st:XsState (itemAt m.states k)
+            def from:string (out.idOf(st.path))
+            def t:int 0
+            while (t < (array_length st.transitions)) {
+                def tr:XsTransition (itemAt st.transitions t)
+                if ((tr.internal()) == false) {
+                    def r:int 0
+                    while (r < (array_length tr.resolved)) {
+                        def to:string (out.idOf((itemAt tr.resolved r)))
+                        if (((strlen to) > 0) && ((strlen from) > 0)) {
+                            XStateRender.link(out from to (tr.label()))
+                        }
+                        r = (r + 1)
+                    }
+                }
+                t = (t + 1)
+            }
+            k = (k + 1)
+        }
+        return out
+    }
+
+    ; A state with states in it becomes a group: `parentGroup` is the group
+    ; it sits in ("" at the top).
+    sfn openGroup:void (out:XStateDrawing s:XsState parentGroup:string gid:string) {
+        def d:MermaidDiagram out.diagram
+        def sg (new MermaidSubgraph)
+        sg.id = gid
+        sg.title = (s.title())
+        if ((strlen s.path) == 0) {
+            if ((strlen sg.title) == 0) {
+                sg.title = "machine"
+            }
+        }
+        if ((strlen parentGroup) > 0) {
+            sg.parent = parentGroup
+            def at:int (d.indexOfSubgraph(parentGroup))
+            if (at >= 0) {
+                def outer:MermaidSubgraph (d.subgraphAt(at))
+                sg.depth = (outer.depth + 1)
+                push outer.members (MermaidDiagram.frameIdOf(gid))
+            }
+        }
+        push d.subgraphs sg
+        push out.groupIds gid
+    }
+
+    ; A link, with the per-link tables the flowchart pipeline keeps beside
+    ; it. An end that is a group is named as a node too, which
+    ; `expandGroupEnds` takes out again once it has drawn the link to the
+    ; frame (Mermaid's rule for `C --> O` with `subgraph O`).
+    sfn link:void (out:XStateDrawing from:string to:string label:string) {
+        def d:MermaidDiagram out.diagram
+        def a:FlowStep (d.ensureStep(from))
+        def b:FlowStep (d.ensureStep(to))
+        def l:FlowLink (d.chart.link(from to))
+        l.label = label
+        push d.linkKinds "solid"
+        push d.linkHeads "arrow"
+        push d.linkTails ""
+        push d.linkIds ""
+        push d.linkAnimated false
+    }
+
+    sfn member:void (out:XStateDrawing group:string id:string) {
+        if ((strlen group) == 0) {
+            return
+        }
+        def d:MermaidDiagram out.diagram
+        def at:int (d.indexOfSubgraph(group))
+        if (at >= 0) {
+            def sg:MermaidSubgraph (d.subgraphAt(at))
+            push sg.members id
+        }
+    }
+
+    ; The rows a box carries under its name: entry and exit actions, the
+    ; services it invokes, and the transitions that stay in it.
+    sfn rows:[string] (s:XsState) {
+        def out:[string]
+        if ((array_length s.entry) > 0) {
+            push out ("entry / " + (join s.entry ", "))
+        }
+        if ((array_length s.exit) > 0) {
+            push out ("exit / " + (join s.exit ", "))
+        }
+        if ((array_length s.invoke) > 0) {
+            push out ("invoke / " + (join s.invoke ", "))
+        }
+        def i:int 0
+        while (i < (array_length s.transitions)) {
+            def t:XsTransition (itemAt s.transitions i)
+            if (t.internal()) {
+                push out (t.label())
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+
+    sfn describeChildren:void (out:XStateDrawing parent:XsState inFrame:boolean) {
+        def d:MermaidDiagram out.diagram
+        def group:string ""
+        if inFrame {
+            group = (out.idOf(parent.path))
+        }
+        ; the start dot, for a level that has one start (not a parallel
+        ; state, whose regions all start at once)
+        def first:string (parent.initialChild())
+        if ((strlen first) > 0) {
+            def dot:string ("i" + (out.idOf(parent.path)))
+            def ds:FlowStep (d.ensureStep(dot))
+            ds.label = ""
+            ds.kind = "connector"
+            push out.initialIds dot
+            XStateRender.member(out group dot)
+            XStateRender.link(out dot (out.idOf(first)) "")
+        }
+        def i:int 0
+        while (i < (parent.childCount())) {
+            def c:XsState (parent.childAt(i))
+            def id:string (out.idOf(c.path))
+            if (c.hasChildren()) {
+                XStateRender.openGroup(out c group id)
+                if (parent.type == "parallel") {
+                    push out.regionIds id
+                }
+                XStateRender.describeChildren(out c true)
+            } {
+                def st:FlowStep (d.ensureStep(id))
+                def lines:[string] (XStateRender.rows(c))
+                def label:string (c.title())
+                def k:int 0
+                while (k < (array_length lines)) {
+                    label = (label + (strfromcode 10) + (itemAt lines k))
+                    k = (k + 1)
+                }
+                st.label = label
+                if (c.type == "history") {
+                    st.kind = "connector"
+                    d.setShape(id "circle")
+                } {
+                    d.setShape(id "round")
+                }
+                if (c.type == "final") {
+                    push out.finalIds id
+                }
+                XStateRender.member(out group id)
+            }
+            i = (i + 1)
+        }
+    }
+
+    ; ---------------------------------------------------------------- draw --
+    sfn drawMachine:MermaidDrawing (m:XsMachine style:FlowStyle memo:FlowLayoutMemo) {
+        return (XStateRender.drawMachineAt(m style memo "LR"))
+    }
+
+    sfn drawMachineAt:MermaidDrawing (m:XsMachine style:FlowStyle memo:FlowLayoutMemo direction:string) {
+        def out:MermaidDrawing (new MermaidDrawing())
+        out.kind = "xstate"
+        out.notation = "plain"
+        if ((m.ok()) == false) {
+            return out
+        }
+        def x:XStateDrawing (XStateRender.describe(m direction))
+        def d:MermaidDiagram x.diagram
+        out.title = m.id
+        def g:FlowGraph (d.buildStyled(style))
+        ; before the layout: the start dots are dots, and a final state
+        ; is a box drawn heavier
+        def i:int 0
+        while (i < (array_length x.initialIds)) {
+            def id:string (itemAt x.initialIds i)
+            if (g.hasNode(id)) {
+                def n:FlowNode (g.nodeById(id))
+                n.shape = "circle"
+                n.label = ""
+                n.width = 20.0
+                n.height = 20.0
+                ; dark on a page; a look that paints its own colours (a
+                ; slide's, on a dark ground) gives it its ink instead
+                n.bgColor = "#2f3542"
+                n.borderColor = "#2f3542"
+                n.cssClass = (n.cssClass + " initial")
+                n.syncFromModel()
+            }
+            i = (i + 1)
+        }
+        def f:int 0
+        while (f < (array_length x.finalIds)) {
+            def fid:string (itemAt x.finalIds f)
+            if (g.hasNode(fid)) {
+                def fn2:FlowNode (g.nodeById(fid))
+                fn2.borderWidth = 3.5
+                fn2.cssClass = (fn2.cssClass + " final")
+            }
+            f = (f + 1)
+        }
+        def y:int 0
+        while (y < (array_length x.anyIds)) {
+            def yid:string (itemAt x.anyIds y)
+            if (g.hasNode(yid)) {
+                def yn:FlowNode (g.nodeById(yid))
+                yn.borderDash = 5.0
+                yn.cssClass = (yn.cssClass + " any")
+            }
+            y = (y + 1)
+        }
+        def laid:FlowGraph (MermaidFlow.laidOut(d g style memo))
+        def r:int 0
+        while (r < (array_length x.regionIds)) {
+            def rid:string (MermaidDiagram.frameIdOf((itemAt x.regionIds r)))
+            if (laid.hasNode(rid)) {
+                def rn:FlowNode (laid.nodeById(rid))
+                rn.borderDash = 6.0
+                rn.cssClass = (rn.cssClass + " region")
+            }
+            r = (r + 1)
+        }
+        out.graph = laid
+        out.ok = true
+        return out
+    }
+
+    sfn draw:MermaidDrawing (text:string style:FlowStyle) {
+        return (XStateRender.drawMachine((XsMachine.parse(text)) style (new FlowLayoutMemo)))
+    }
+
+    sfn sceneOf:FlowScene (text:string styleName:string maxWidth:double padding:double) {
+        def style:FlowStyle (FlowStyle.named(styleName))
+        return (XStateRender.sceneWrappedStyled(text style maxWidth padding 0.0))
+    }
+
+    sfn sceneWrappedStyled:FlowScene (text:string style:FlowStyle maxWidth:double padding:double aspect:double) {
+        def drawing:MermaidDrawing (XStateRender.draw(text style))
+        return (MermaidRender.sceneOfDrawing(drawing style maxWidth padding 0.0))
+    }
+
+    ; For a room `maxWidth` wide and `maxWidth / aspect` high (a slide's):
+    ; laid out left to right and top to bottom, and the one that comes out
+    ; larger in the room is kept. A machine with a long nested branch is a
+    ; strip across the page one way and fills it the other. A statechart is
+    ; never cut into columns: a frame cut in two is two frames.
+    sfn sceneForRoom:FlowScene (text:string style:FlowStyle maxWidth:double padding:double aspect:double) {
+        def m:XsMachine (XsMachine.parse(text))
+        def across:MermaidDrawing (XStateRender.drawMachineAt(m style (new FlowLayoutMemo) "LR"))
+        if (((aspect <= 0.0) || (maxWidth <= 0.0)) || (across.ok == false)) {
+            return (MermaidRender.sceneOfDrawing(across style maxWidth padding 0.0))
+        }
+        def down:MermaidDrawing (XStateRender.drawMachineAt(m style (new FlowLayoutMemo) "TB"))
+        def a:FlowScene (MermaidRender.sceneOfDrawing(across style 0.0 padding 0.0))
+        def b:FlowScene (MermaidRender.sceneOfDrawing(down style 0.0 padding 0.0))
+        def roomH:double (maxWidth / aspect)
+        if ((XStateRender.fit(b maxWidth roomH)) > ((XStateRender.fit(a maxWidth roomH)) * 1.05)) {
+            return (MermaidRender.sceneOfDrawing(down style maxWidth padding 0.0))
+        }
+        return (MermaidRender.sceneOfDrawing(across style maxWidth padding 0.0))
+    }
+
+    ; The scale a scene is drawn at in a room (at most 1: a small machine
+    ; is not blown up past its natural size by this choice).
+    sfn fit:double (sc:FlowScene w:double h:double) {
+        if ((sc.worldW <= 0.0) || (sc.worldH <= 0.0)) {
+            return 0.0
+        }
+        def k:double (w / sc.worldW)
+        def kh:double (h / sc.worldH)
+        if (kh < k) {
+            k = kh
+        }
+        return k
+    }
+}

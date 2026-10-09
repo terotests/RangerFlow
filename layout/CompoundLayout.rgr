@@ -130,6 +130,11 @@ class CompoundLayout {
     ; with it: at a slide's sizes the floor that held a label in a document
     ; left it no stretch of its own line, and it was set over the next one.
     def labelScale:double 1.0
+    ; Start the gap at the label floor rather than only holding it there
+    ; when the gaps close: for a diagram where nearly every arrow is named
+    ; (a statechart), the default gap is narrower than its labels and
+    ; `closeGaps`, which only narrows, never widens it to them.
+    def labelsSetGap:boolean false
     ; Handed to every layered layout this runs — see `LayoutMemo`.
     def memo:FlowLayoutMemo (new FlowLayoutMemo)
 
@@ -313,8 +318,20 @@ class CompoundLayout {
             if labelRoomLR {
                 def chars:int (lay.longestLabel())
                 def labelRoom:double ((((to_double chars) * 6.6) * labelScale) + 48.0)
+                if labelsSetGap {
+                    ; one line up to 160 wide, then a second (FlowView's
+                    ; edge labels): 160 is the most one needs along
+                    def along:double ((to_double chars) * 6.6)
+                    if (along > 160.0) {
+                        along = 160.0
+                    }
+                    labelRoom = ((along * labelScale) + 48.0)
+                }
                 if (labelRoom > lay.minLayerGap) {
                     lay.minLayerGap = labelRoom
+                }
+                if (labelsSetGap && (lay.layerGap < lay.minLayerGap)) {
+                    lay.layerGap = lay.minLayerGap
                 }
             }
         } {

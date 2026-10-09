@@ -386,6 +386,13 @@ class MermaidRender {
 
     sfn sceneWrappedWith:FlowScene (text:string style:FlowStyle maxWidth:double padding:double aspect:double memo:FlowLayoutMemo) {
         def drawing:MermaidDrawing (MermaidRender.drawWith(text style memo))
+        return (MermaidRender.sceneOfDrawing(drawing style maxWidth padding aspect))
+    }
+
+    ; A laid-out drawing, as a scene: wrapped for `aspect`, text filled,
+    ; fitted to `maxWidth`. Shared with the other readers that hand back a
+    ; MermaidDrawing (`XStateRender`).
+    sfn sceneOfDrawing:FlowScene (drawing:MermaidDrawing style:FlowStyle maxWidth:double padding:double aspect:double) {
         if (! drawing.ok) {
             return (new FlowScene)
         }

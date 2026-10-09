@@ -1,0 +1,716 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ============================================================================
+; XsMachine.rgr — a statechart as data: the workflow IR.
+; ============================================================================
+;
+; What an XState v5 machine config SAYS, with nothing about how it is drawn
+; and nothing about how it is run:
+;
+;   XsMachine ── root XsState ── children XsState … (nested, in written order)
+;                     │
+;                     └── transitions XsTransition (event, guard, actions,
+;                                                   targets → state paths)
+;
+; It is the one model three consumers share. The drawing (`XStateRender`)
+; turns it into boxes and arrows; the editor's window changes the config
+; through `XsEdit` and reads it back through this; and a workflow executor —
+; later, behind a `WorkflowEngine` interface, in the browser for a preview
+; and on the server for the authoritative answer — walks the same states and
+; transitions. None of them owns it, which is why it lives apart from all
+; three.
+;
+; **Read as XState v5 reads it.** `on` takes a target string, an object or an
+; array of guarded alternatives (first passing wins); `always`, `after` and
+; `onDone` are transitions without a named event; `entry` / `exit` /
+; `actions` take a name, `{ "type": name }`, or a list of either; `guard`
+; takes a name or `{ "type": name }`. Targets resolve the way XState does:
+; `#id` from anywhere, `.child` below the source, a bare name beside it.
+;
+; **Names, never code.** A guard or an action is a NAME here. What
+; `role:tester` or `document:addComment` does is the executor's business,
+; given by the host — the definition stays data a server can trust.
+; ============================================================================
+
+Import "XsJson.rgr"
+
+; Something the config gets wrong, or leaves for the reader to guess.
+class XsIssue {
+    def path:string ""
+    def message:string ""
+    ; "error" when the machine cannot work as written, "warning" otherwise
+    def level:string "error"
+    def line:int 0
+
+    Constructor () {
+    }
+}
+
+class XsTransition {
+    ; the event's name; "" for `always`
+    def event:string ""
+    ; "on" | "always" | "after" | "done" | "error"
+    def kind:string "on"
+    ; the path of the state it is written on ("" = the machine itself)
+    def source:string ""
+    ; the targets as written, and each one resolved to a state path ("?" when
+    ; it names nothing)
+    def targets:[string]
+    def resolved:[string]
+    def guard:string ""
+    def actions:[string]
+    def reenter:boolean false
+    def description:string ""
+    ; its place among the alternatives written for the same event, and how
+    ; many there are: `next: [ {guard}, {} ]` is 0 of 2 and 1 of 2
+    def alt:int 0
+    def alts:int 1
+
+    Constructor () {
+    }
+
+    ; No target: the machine stays where it is and only runs the actions.
+    fn internal:boolean () {
+        return ((array_length targets) == 0)
+    }
+
+    ; The trigger as a reader says it: "next", "always", "after 2s", "done".
+    fn trigger:string () {
+        if (kind == "always") {
+            return "always"
+        }
+        if (kind == "after") {
+            return ("after " + (XsTransition.delayText(event)))
+        }
+        if (kind == "done") {
+            return "done"
+        }
+        if (kind == "error") {
+            return "error"
+        }
+        return event
+    }
+
+    ; 1000 → "1s", 86400000 → "1d", 1500 → "1500ms", a named delay as it is.
+    sfn delayText:string (raw:string) {
+        def d@(optional):double (str2double (trim raw))
+        if (null? d) {
+            return raw
+        }
+        def ms:double (unwrap d)
+        def whole:int (to_int ms)
+        if ((to_double whole) != ms) {
+            return (raw + "ms")
+        }
+        if (whole > 0) {
+            if ((whole % 86400000) == 0) {
+                return ((to_string (idiv whole 86400000)) + "d")
+            }
+            if ((whole % 3600000) == 0) {
+                return ((to_string (idiv whole 3600000)) + "h")
+            }
+            if ((whole % 60000) == 0) {
+                return ((to_string (idiv whole 60000)) + "min")
+            }
+            if ((whole % 1000) == 0) {
+                return ((to_string (idiv whole 1000)) + "s")
+            }
+        }
+        return ((to_string whole) + "ms")
+    }
+
+    ; UML's way of writing it on the arrow: `event [guard] / action, action`,
+    ; with `else` for the unguarded last of several alternatives and their
+    ; order in front when there is more than one ("1. next [ok]").
+    fn label:string () {
+        def out:string (this.trigger())
+        if (alts > 1) {
+            out = ((to_string (alt + 1)) + ". " + out)
+        }
+        if ((strlen guard) > 0) {
+            out = (out + " [" + guard + "]")
+        } {
+            if ((alts > 1) && (alt > 0)) {
+                out = (out + " [else]")
+            }
+        }
+        if ((array_length actions) > 0) {
+            out = (out + " / " + (join actions ", "))
+        }
+        return out
+    }
+}
+
+class XsState {
+    def key:string ""
+    ; the keys from the machine down, joined with "." ("" = the machine)
+    def path:string ""
+    def parent:string ""
+    def depth:int 0
+    ; an explicit `id`, for `#id` targets
+    def id:string ""
+    ; "atomic" | "compound" | "parallel" | "final" | "history"
+    def type:string "atomic"
+    ; "shallow" | "deep", for a history state
+    def history:string "shallow"
+    def initial:string ""
+    def description:string ""
+    def tags:[string]
+    def entry:[string]
+    def exit:[string]
+    def invoke:[string]
+    def children:[XsState]
+    def transitions:[XsTransition]
+
+    Constructor () {
+    }
+
+    fn childCount:int () {
+        return (array_length children)
+    }
+
+    fn childAt:XsState (i:int) {
+        return (itemAt children i)
+    }
+
+    fn child@(optional):XsState (k:string) {
+        def found@(optional):XsState
+        def i:int 0
+        while (i < (array_length children)) {
+            def c:XsState (itemAt children i)
+            if (c.key == k) {
+                found = c
+                return found
+            }
+            i = (i + 1)
+        }
+        return found
+    }
+
+    fn hasChildren:boolean () {
+        return ((array_length children) > 0)
+    }
+
+    ; The child the state starts in: `initial` when it names one, else the
+    ; first (XState v5 refuses the machine; the drawing still shows it).
+    fn initialChild:string () {
+        if ((array_length children) == 0) {
+            return ""
+        }
+        def i:int 0
+        while (i < (array_length children)) {
+            def c:XsState (itemAt children i)
+            if (c.key == initial) {
+                return c.path
+            }
+            i = (i + 1)
+        }
+        if (type == "parallel") {
+            return ""
+        }
+        def first:XsState (itemAt children 0)
+        return first.path
+    }
+
+    ; The title a box carries.
+    fn title:string () {
+        if (type == "history") {
+            if (history == "deep") {
+                return "H*"
+            }
+            return "H"
+        }
+        return key
+    }
+}
+
+class XsMachine {
+    def id:string ""
+    def root:XsState (new XsState)
+    ; every state, the machine first, in the order written (depth first)
+    def states:[XsState]
+    def issues:[XsIssue]
+    ; the config's own tree, kept so an edit changes only what it names
+    def doc:XsJson (new XsJson)
+    ; the text could not be read at all
+    def readError:string ""
+    def readErrorLine:int 0
+
+    Constructor () {
+    }
+
+    sfn parse:XsMachine (text:string) {
+        def r (new XsJsonReader)
+        def tree:XsJson (r.read(text))
+        if ((strlen r.error) > 0) {
+            def bad (new XsMachine)
+            bad.readError = r.error
+            bad.readErrorLine = (r.errorLine())
+            return bad
+        }
+        return (XsMachine.fromJson(tree))
+    }
+
+    sfn fromJson:XsMachine (tree:XsJson) {
+        def m (new XsMachine)
+        m.doc = tree
+        if ((tree.isObject()) == false) {
+            m.readError = "the machine config is not an object { … }"
+            return m
+        }
+        m.id = (tree.stringOr("id" ""))
+        m.root.key = m.id
+        m.root.id = m.id
+        m.readState(m.root tree)
+        m.resolveAll()
+        m.check()
+        return m
+    }
+
+    fn ok:boolean () {
+        return (((strlen readError) == 0) && ((array_length states) > 1))
+    }
+
+    ; Why there is nothing to draw, with the line when the text is at fault.
+    fn refusal:string () {
+        if ((strlen readError) > 0) {
+            if (readErrorLine > 0) {
+                return (readError + " — line " + (to_string readErrorLine))
+            }
+            return readError
+        }
+        if ((array_length states) <= 1) {
+            return "the machine has no states: give it \"states\": { … }"
+        }
+        return ""
+    }
+
+    fn stateCount:int () {
+        return ((array_length states) - 1)
+    }
+
+    fn transitionCount:int () {
+        def c:int 0
+        def i:int 0
+        while (i < (array_length states)) {
+            def s:XsState (itemAt states i)
+            c = (c + (array_length s.transitions))
+            i = (i + 1)
+        }
+        return c
+    }
+
+    fn stateAt@(optional):XsState (path:string) {
+        def found@(optional):XsState
+        def i:int 0
+        while (i < (array_length states)) {
+            def s:XsState (itemAt states i)
+            if (s.path == path) {
+                found = s
+                return found
+            }
+            i = (i + 1)
+        }
+        return found
+    }
+
+    fn hasState:boolean (path:string) {
+        def s@(optional):XsState (this.stateAt(path))
+        return (!null? s)
+    }
+
+    fn byId:string (wanted:string) {
+        def i:int 0
+        while (i < (array_length states)) {
+            def s:XsState (itemAt states i)
+            if ((strlen s.id) > 0) {
+                if (s.id == wanted) {
+                    return s.path
+                }
+            }
+            i = (i + 1)
+        }
+        return "?"
+    }
+
+    fn issue:void (path:string message:string level:string) {
+        def x (new XsIssue)
+        x.path = path
+        x.message = message
+        x.level = level
+        push issues x
+    }
+
+    fn errorCount:int () {
+        def c:int 0
+        def i:int 0
+        while (i < (array_length issues)) {
+            def x:XsIssue (itemAt issues i)
+            if (x.level == "error") {
+                c = (c + 1)
+            }
+            i = (i + 1)
+        }
+        return c
+    }
+
+    ; ---------------------------------------------------------------- read --
+    sfn join:string (parent:string k:string) {
+        if ((strlen parent) == 0) {
+            return k
+        }
+        return (parent + "." + k)
+    }
+
+    ; A name, `{ "type": name }`, or a list of either → names.
+    sfn names:[string] (v:XsJson) {
+        def out:[string]
+        if (v.isString()) {
+            push out v.str
+            return out
+        }
+        if (v.isObject()) {
+            def t:string (v.stringOr("type" ""))
+            if ((strlen t) > 0) {
+                push out t
+            }
+            return out
+        }
+        if (v.isArray()) {
+            def i:int 0
+            while (i < (v.count())) {
+                def it:XsJson (v.at(i))
+                def more:[string] (XsMachine.names(it))
+                def k:int 0
+                while (k < (array_length more)) {
+                    push out (itemAt more k)
+                    k = (k + 1)
+                }
+                i = (i + 1)
+            }
+        }
+        return out
+    }
+
+    sfn guardName:string (v:XsJson) {
+        if (v.isString()) {
+            return v.str
+        }
+        if (v.isObject()) {
+            def t:string (v.stringOr("type" ""))
+            ; `{ type: "not", guards: […] }` and friends, written as XState's
+            ; helpers serialise: the helper and what it combines
+            if (v.has("guards")) {
+                def inner:XsJson (v.get("guards"))
+                def parts:[string]
+                def i:int 0
+                while (i < (inner.count())) {
+                    push parts (XsMachine.guardName((inner.at(i))))
+                    i = (i + 1)
+                }
+                return (t + "(" + (join parts ", ") + ")")
+            }
+            if (v.has("guard")) {
+                return (t + "(" + (XsMachine.guardName((v.get("guard")))) + ")")
+            }
+            return t
+        }
+        return ""
+    }
+
+    fn readState:void (st:XsState node:XsJson) {
+        push states st
+        if ((node.isObject()) == false) {
+            if ((strlen st.path) > 0) {
+                this.issue(st.path "a state is an object { … }" "error")
+            }
+            return
+        }
+        if ((strlen st.path) > 0) {
+            st.id = (node.stringOr("id" ""))
+        }
+        st.initial = (node.stringOr("initial" ""))
+        st.description = (node.stringOr("description" ""))
+        def t:string (node.stringOr("type" ""))
+        if (t == "final") {
+            st.type = "final"
+        }
+        if (t == "parallel") {
+            st.type = "parallel"
+        }
+        if (t == "history") {
+            st.type = "history"
+            st.history = (node.stringOr("history" "shallow"))
+        }
+        st.entry = (XsMachine.names((node.get("entry"))))
+        st.exit = (XsMachine.names((node.get("exit"))))
+        if (node.has("tags")) {
+            st.tags = (XsMachine.names((node.get("tags"))))
+        }
+        if (node.has("invoke")) {
+            this.readInvoke(st (node.get("invoke")))
+        }
+        if (node.has("on")) {
+            def on:XsJson (node.get("on"))
+            if (on.isObject()) {
+                def i:int 0
+                while (i < (on.count())) {
+                    this.readEvent(st (on.keyAt(i)) "on" (on.valueAt(i)))
+                    i = (i + 1)
+                }
+            }
+        }
+        if (node.has("always")) {
+            this.readEvent(st "" "always" (node.get("always")))
+        }
+        if (node.has("after")) {
+            def af:XsJson (node.get("after"))
+            if (af.isObject()) {
+                def a:int 0
+                while (a < (af.count())) {
+                    this.readEvent(st (af.keyAt(a)) "after" (af.valueAt(a)))
+                    a = (a + 1)
+                }
+            }
+        }
+        if (node.has("onDone")) {
+            this.readEvent(st "" "done" (node.get("onDone")))
+        }
+        if (node.has("states")) {
+            def kids:XsJson (node.get("states"))
+            if (kids.isObject()) {
+                def k:int 0
+                while (k < (kids.count())) {
+                    def c (new XsState)
+                    c.key = (kids.keyAt(k))
+                    c.path = (XsMachine.join(st.path c.key))
+                    c.parent = st.path
+                    c.depth = (st.depth + 1)
+                    push st.children c
+                    this.readState(c (kids.valueAt(k)))
+                    k = (k + 1)
+                }
+            }
+        }
+        if ((st.type == "atomic") && ((array_length st.children) > 0)) {
+            st.type = "compound"
+        }
+    }
+
+    ; `invoke: { src, onDone, onError }`, one or a list: the service's name
+    ; on the state, and its two outcomes as transitions.
+    fn readInvoke:void (st:XsState v:XsJson) {
+        if (v.isArray()) {
+            def i:int 0
+            while (i < (v.count())) {
+                this.readInvoke(st (v.at(i)))
+                i = (i + 1)
+            }
+            return
+        }
+        if ((v.isObject()) == false) {
+            return
+        }
+        def src:XsJson (v.get("src"))
+        def name:string ""
+        if (src.isString()) {
+            name = src.str
+        }
+        if (src.isObject()) {
+            name = (src.stringOr("type" ""))
+        }
+        if ((strlen name) == 0) {
+            name = (v.stringOr("id" "service"))
+        }
+        push st.invoke name
+        if (v.has("onDone")) {
+            this.readEvent(st name "done" (v.get("onDone")))
+        }
+        if (v.has("onError")) {
+            this.readEvent(st name "error" (v.get("onError")))
+        }
+    }
+
+    fn readEvent:void (st:XsState event:string kind:string spec:XsJson) {
+        def list:[XsJson]
+        if (spec.isArray()) {
+            def i:int 0
+            while (i < (spec.count())) {
+                push list (spec.at(i))
+                i = (i + 1)
+            }
+        } {
+            push list spec
+        }
+        def count:int (array_length list)
+        def k:int 0
+        while (k < count) {
+            def one:XsJson (itemAt list k)
+            def t (new XsTransition)
+            t.event = event
+            t.kind = kind
+            t.source = st.path
+            t.alt = k
+            t.alts = count
+            if (one.isString()) {
+                push t.targets one.str
+            }
+            if (one.isObject()) {
+                def tg:XsJson (one.get("target"))
+                if (tg.isString()) {
+                    push t.targets tg.str
+                }
+                if (tg.isArray()) {
+                    def j:int 0
+                    while (j < (tg.count())) {
+                        def tj:XsJson (tg.at(j))
+                        if (tj.isString()) {
+                            push t.targets tj.str
+                        }
+                        j = (j + 1)
+                    }
+                }
+                if (one.has("guard")) {
+                    t.guard = (XsMachine.guardName((one.get("guard"))))
+                }
+                ; v4's name, still met in pasted machines
+                if (one.has("cond")) {
+                    t.guard = (XsMachine.guardName((one.get("cond"))))
+                }
+                t.actions = (XsMachine.names((one.get("actions"))))
+                t.reenter = (one.boolOr("reenter" false))
+                t.description = (one.stringOr("description" ""))
+            }
+            push st.transitions t
+            k = (k + 1)
+        }
+    }
+
+    ; ------------------------------------------------------------- resolve --
+    ; A target written on `source` → the state it names: `#id` (and
+    ; `#id.child`), `.child` under the source, a name beside it (and
+    ; `name.child` below that). "?" when it names nothing.
+    fn resolve:string (source:string target:string) {
+        if ((strlen target) == 0) {
+            return "?"
+        }
+        def first:int (charAt target 0)
+        if (first == 35) {
+            def rest:string (substring target 1 (strlen target))
+            def dot:int (indexOf rest ".")
+            def idPart:string rest
+            def tail:string ""
+            if (dot >= 0) {
+                idPart = (substring rest 0 dot)
+                tail = (substring rest (dot + 1) (strlen rest))
+            }
+            def base:string ""
+            if (idPart != id) {
+                base = (this.byId(idPart))
+            }
+            if ((base == "?") || ((strlen tail) == 0)) {
+                return base
+            }
+            return (this.descend(base tail))
+        }
+        if (first == 46) {
+            return (this.descend(source (substring target 1 (strlen target))))
+        }
+        ; beside the source: under its parent (the machine's own `on` names
+        ; its top-level states)
+        def owner:string ""
+        def src@(optional):XsState (this.stateAt(source))
+        if (!null? src) {
+            def s:XsState (unwrap src)
+            owner = s.parent
+            if ((strlen source) == 0) {
+                owner = ""
+            }
+        }
+        return (this.descend(owner target))
+    }
+
+    ; `a.b.c` walked down from `base`, a key at a time. Keys may hold
+    ; spaces; a key holding a dot is matched whole before it is split.
+    fn descend:string (base:string rel:string) {
+        def whole:string (XsMachine.join(base rel))
+        if (this.hasState(whole)) {
+            return whole
+        }
+        def parts:[string] (strsplit rel ".")
+        def here:string base
+        def i:int 0
+        while (i < (array_length parts)) {
+            def next:string (XsMachine.join(here (itemAt parts i)))
+            if ((this.hasState(next)) == false) {
+                return "?"
+            }
+            here = next
+            i = (i + 1)
+        }
+        return here
+    }
+
+    fn resolveAll:void () {
+        def i:int 0
+        while (i < (array_length states)) {
+            def s:XsState (itemAt states i)
+            def k:int 0
+            while (k < (array_length s.transitions)) {
+                def t:XsTransition (itemAt s.transitions k)
+                clear t.resolved
+                def j:int 0
+                while (j < (array_length t.targets)) {
+                    push t.resolved (this.resolve(s.path (itemAt t.targets j)))
+                    j = (j + 1)
+                }
+                k = (k + 1)
+            }
+            i = (i + 1)
+        }
+    }
+
+    ; --------------------------------------------------------------- check --
+    fn check:void () {
+        def i:int 0
+        while (i < (array_length states)) {
+            def s:XsState (itemAt states i)
+            def where:string s.path
+            if ((strlen where) == 0) {
+                where = "(machine)"
+            }
+            if (s.type == "compound") {
+                if ((strlen s.initial) == 0) {
+                    this.issue(where "has states but no \"initial\": the first one is drawn as the start" "warning")
+                } {
+                    def c@(optional):XsState (s.child(s.initial))
+                    if (null? c) {
+                        this.issue(where ("\"initial\": \"" + s.initial + "\" is not one of its states") "error")
+                    }
+                }
+            }
+            if ((s.type == "final") && ((array_length s.children) > 0)) {
+                this.issue(where "a final state has no states inside it" "error")
+            }
+            if ((s.type == "final") && ((array_length s.transitions) > 0)) {
+                this.issue(where "a final state has no transitions out of it" "error")
+            }
+            def k:int 0
+            while (k < (array_length s.transitions)) {
+                def t:XsTransition (itemAt s.transitions k)
+                def j:int 0
+                while (j < (array_length t.resolved)) {
+                    if ((itemAt t.resolved j) == "?") {
+                        this.issue(where ((t.trigger()) + ": no state \"" + (itemAt t.targets j) + "\"") "error")
+                    }
+                    j = (j + 1)
+                }
+                if (((t.alts > 1) && ((strlen t.guard) == 0)) && (t.alt < (t.alts - 1))) {
+                    this.issue(where ((t.trigger()) + ": an alternative with no guard before the last one; the ones after it never run") "warning")
+                }
+                k = (k + 1)
+            }
+            i = (i + 1)
+        }
+    }
+}

@@ -441,6 +441,20 @@ it starts at; `state "A long name" as s`, `s : a description` (which becomes
 the second line of the box), `<<fork>>`, `<<join>>`, `<<choice>>` and
 `direction`. Notes and the `--` concurrency divider are dropped.
 
+### …and XState machines
+
+`domains/xstate` reads an XState v5 machine config, as JSON or as a Stately
+`createMachine({...})` export, into an IR (`XsMachine`: states, transitions,
+guards and actions as names, targets resolved, issues listed) and draws it as
+a statechart: compound and parallel states as frames, an initial dot per
+level, final states with a double border, and transitions labelled
+`event [guard] / actions`, numbered with `[else]` when one event has several
+alternatives. `XsEdit` changes the config (add, rename, nest, retarget) and
+writes the JSON back. Functions in a config are refused: guards and actions
+are names.
+
+    npm run rangerflow:xstate:test
+
 ### …and mind maps
 
 The one with no arrows in it. Indentation is the syntax, and `MindMapLayout`
