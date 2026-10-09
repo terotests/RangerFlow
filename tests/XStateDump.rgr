@@ -1,0 +1,25 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+; An XState machine config (a file) drawn as SVG on stdout.
+;   node bin/XStateDump.js machine.json [style] > out.svg
+Import "../domains/xstate/XStateRender.rgr"
+
+class XStateDump {
+    sfn main:void () {
+        if ((shell_arg_cnt) < 1) {
+            print "usage: XStateDump <machine.json> [style]"
+            return
+        }
+        def text:string (?? (read_file "." (shell_arg 0)) "")
+        def style:string ""
+        if ((shell_arg_cnt) > 1) {
+            style = (shell_arg 1)
+        }
+        def why:string (XStateRender.refusal(text))
+        if ((strlen why) > 0) {
+            print ("refused: " + why)
+            return
+        }
+        def sc:FlowScene (XStateRender.sceneOf(text style 0.0 12.0))
+        print (sc.toSvg())
+    }
+}

@@ -1,0 +1,721 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+
+; ============================================================================
+; XsEdit.rgr — changes to a machine config, made the way an author would.
+; ============================================================================
+;
+; The window that edits a ```xstate block works through this and nothing
+; else: add, rename and remove a state, mark it final, choose a level's
+; start, and add, change and remove a transition. Each change is made to the
+; config's own tree (`XsMachine.doc`), so whatever this does not model —
+; `context`, `meta`, an `invoke`'s input, a description — comes back exactly
+; as it went in, and the machine is read again from the tree after it:
+;
+;   text ──XsMachine.parse──► machine + tree
+;                                   │  XsEdit.renameState("draft" "luonnos")
+;                                   ▼
+;   text ◄──── tree.write ──── tree (targets that named "draft" follow)
+;
+; Renaming a state rewrites every target that reached it, and the parent's
+; `initial`; removing one removes the transitions into it. A target this
+; writes is the shortest XState reads the same way: a sibling's key, `.child`
+; below the source, and `#machine.path` from anywhere else.
+; ============================================================================
+
+Import "XsMachine.rgr"
+
+class XsEdit {
+    def machine:XsMachine (new XsMachine)
+    ; why the last change was not made ("" when it was)
+    def refused:string ""
+
+    Constructor () {
+    }
+
+    sfn of:XsEdit (text:string) {
+        def e (new XsEdit)
+        e.machine = (XsMachine.parse(text))
+        return e
+    }
+
+    fn ok:boolean () {
+        return ((strlen machine.readError) == 0)
+    }
+
+    fn text:string () {
+        return (machine.doc.write(0))
+    }
+
+    ; The tree is the truth; the machine is read from it again.
+    fn reread:void () {
+        machine = (XsMachine.fromJson(machine.doc))
+    }
+
+    fn refuse:boolean (why:string) {
+        refused = why
+        return false
+    }
+
+    ; The keys from the machine down to a state.
+    fn keysOf:[string] (path:string) {
+        def out:[string]
+        def here:string path
+        def guard:int 0
+        while (((strlen here) > 0) && (guard < 64)) {
+            def s@(optional):XsState (machine.stateAt(here))
+            if (null? s) {
+                return out
+            }
+            def st:XsState (unwrap s)
+            insert out 0 st.key
+            here = st.parent
+            guard = (guard + 1)
+        }
+        return out
+    }
+
+    ; The config object of the state at `path` ("" = the machine).
+    fn nodeOf@(optional):XsJson (path:string) {
+        def found@(optional):XsJson
+        def keys:[string] (this.keysOf(path))
+        def node:XsJson machine.doc
+        def i:int 0
+        while (i < (array_length keys)) {
+            def kids:XsJson (node.get("states"))
+            if ((kids.has((itemAt keys i))) == false) {
+                return found
+            }
+            node = (kids.get((itemAt keys i)))
+            i = (i + 1)
+        }
+        found = node
+        return found
+    }
+
+    sfn validKey:boolean (k:string) {
+        if ((strlen (trim k)) == 0) {
+            return false
+        }
+        if ((indexOf k ".") >= 0) {
+            return false
+        }
+        if ((indexOf k "#") >= 0) {
+            return false
+        }
+        return true
+    }
+
+    ; ------------------------------------------------------------ states --
+    fn addState:boolean (parentPath:string k:string) {
+        refused = ""
+        if ((XsEdit.validKey(k)) == false) {
+            return (this.refuse("a state's name is not empty and has no . or #"))
+        }
+        def pn@(optional):XsJson (this.nodeOf(parentPath))
+        if (null? pn) {
+            return (this.refuse(("no state " + parentPath)))
+        }
+        def p:XsJson (unwrap pn)
+        if ((p.stringOr("type" "")) == "final") {
+            return (this.refuse("a final state has no states inside it"))
+        }
+        def kids:XsJson (p.get("states"))
+        if ((kids.isObject()) == false) {
+            kids = (XsJson.object())
+            p.set("states" kids)
+        }
+        if (kids.has(k)) {
+            return (this.refuse(("there is already a state " + k)))
+        }
+        kids.set(k (XsJson.object()))
+        if ((strlen (p.stringOr("initial" ""))) == 0) {
+            if ((p.stringOr("type" "")) != "parallel") {
+                p.setAfter("initial" (XsJson.text(k)) "id")
+            }
+        }
+        this.reread()
+        return true
+    }
+
+    fn setInitial:boolean (parentPath:string k:string) {
+        refused = ""
+        def pn@(optional):XsJson (this.nodeOf(parentPath))
+        if (null? pn) {
+            return (this.refuse(("no state " + parentPath)))
+        }
+        def p:XsJson (unwrap pn)
+        def kids:XsJson (p.get("states"))
+        if ((kids.has(k)) == false) {
+            return (this.refuse((k + " is not one of its states")))
+        }
+        p.setAfter("initial" (XsJson.text(k)) "id")
+        this.reread()
+        return true
+    }
+
+    fn setFinal:boolean (path:string final:boolean) {
+        refused = ""
+        def sn@(optional):XsJson (this.nodeOf(path))
+        if ((null? sn) || ((strlen path) == 0)) {
+            return (this.refuse(("no state " + path)))
+        }
+        def s:XsJson (unwrap sn)
+        if final {
+            if ((s.get("states")).isObject()) {
+                if (((s.get("states")).count()) > 0) {
+                    return (this.refuse("a state with states inside it cannot be final"))
+                }
+            }
+            s.set("type" (XsJson.text("final")))
+        } {
+            if ((s.stringOr("type" "")) == "final") {
+                s.remove("type")
+            }
+        }
+        this.reread()
+        return true
+    }
+
+    ; Every written target that reaches `path` or a state below it, with
+    ; `path`'s own key replaced by `newKey`: the transitions keep pointing
+    ; where they pointed.
+    fn renameState:boolean (path:string newKey:string) {
+        refused = ""
+        if ((XsEdit.validKey(newKey)) == false) {
+            return (this.refuse("a state's name is not empty and has no . or #"))
+        }
+        def so@(optional):XsState (machine.stateAt(path))
+        if ((null? so) || ((strlen path) == 0)) {
+            return (this.refuse(("no state " + path)))
+        }
+        def st:XsState (unwrap so)
+        if (st.key == newKey) {
+            return true
+        }
+        def pn@(optional):XsJson (this.nodeOf(st.parent))
+        def p:XsJson (unwrap pn)
+        def kids:XsJson (p.get("states"))
+        if (kids.has(newKey)) {
+            return (this.refuse(("there is already a state " + newKey)))
+        }
+        ; the targets first, while the machine still resolves the old names
+        def i:int 0
+        while (i < (array_length machine.states)) {
+            def s:XsState (itemAt machine.states i)
+            def sn@(optional):XsJson (this.nodeOf(s.path))
+            if (!null? sn) {
+                this.retargetIn((unwrap sn) s.path path st.key newKey)
+            }
+            i = (i + 1)
+        }
+        if ((p.stringOr("initial" "")) == st.key) {
+            p.set("initial" (XsJson.text(newKey)))
+        }
+        kids.renameKey(st.key newKey)
+        this.reread()
+        return true
+    }
+
+    ; One state's transitions: each target string that walks through
+    ; `renamed`, rewritten with the new key in that place.
+    fn retargetIn:void (node:XsJson source:string renamed:string oldKey:string newKey:string) {
+        def lists:[XsJson]
+        if (node.has("on")) {
+            def on:XsJson (node.get("on"))
+            def k:int 0
+            while (k < (on.count())) {
+                push lists (on.valueAt(k))
+                k = (k + 1)
+            }
+        }
+        if (node.has("always")) {
+            push lists (node.get("always"))
+        }
+        if (node.has("onDone")) {
+            push lists (node.get("onDone"))
+        }
+        if (node.has("after")) {
+            def af:XsJson (node.get("after"))
+            def a:int 0
+            while (a < (af.count())) {
+                push lists (af.valueAt(a))
+                a = (a + 1)
+            }
+        }
+        def j:int 0
+        while (j < (array_length lists)) {
+            this.retargetSpec((itemAt lists j) source renamed oldKey newKey)
+            j = (j + 1)
+        }
+    }
+
+    fn retargetSpec:void (spec:XsJson source:string renamed:string oldKey:string newKey:string) {
+        if (spec.isArray()) {
+            def i:int 0
+            while (i < (spec.count())) {
+                this.retargetSpec((spec.at(i)) source renamed oldKey newKey)
+                i = (i + 1)
+            }
+            return
+        }
+        if (spec.isString()) {
+            spec.str = (this.retarget(source spec.str renamed oldKey newKey))
+            return
+        }
+        if (spec.isObject()) {
+            def tg:XsJson (spec.get("target"))
+            if (tg.isString()) {
+                tg.str = (this.retarget(source tg.str renamed oldKey newKey))
+            }
+            if (tg.isArray()) {
+                def k:int 0
+                while (k < (tg.count())) {
+                    def one:XsJson (tg.at(k))
+                    if (one.isString()) {
+                        one.str = (this.retarget(source one.str renamed oldKey newKey))
+                    }
+                    k = (k + 1)
+                }
+            }
+        }
+    }
+
+    ; The target walked as `XsMachine.resolve` walks it; the segment that
+    ; lands on `renamed` is the one that changes.
+    fn retarget:string (source:string target:string renamed:string oldKey:string newKey:string) {
+        if ((strlen target) == 0) {
+            return target
+        }
+        def prefix:string ""
+        def rel:string target
+        def base:string ""
+        def first:int (charAt target 0)
+        if (first == 35) {
+            def rest:string (substring target 1 (strlen target))
+            def dot:int (indexOf rest ".")
+            if (dot < 0) {
+                return target
+            }
+            def idPart:string (substring rest 0 dot)
+            prefix = ("#" + idPart + ".")
+            rel = (substring rest (dot + 1) (strlen rest))
+            if (idPart != machine.id) {
+                base = (machine.byId(idPart))
+            }
+        } {
+            if (first == 46) {
+                prefix = "."
+                rel = (substring target 1 (strlen target))
+                base = source
+            } {
+                def so@(optional):XsState (machine.stateAt(source))
+                if (!null? so) {
+                    def s:XsState (unwrap so)
+                    base = s.parent
+                }
+                if ((strlen source) == 0) {
+                    base = ""
+                }
+            }
+        }
+        if (base == "?") {
+            return target
+        }
+        def parts:[string] (strsplit rel ".")
+        def here:string base
+        def out:[string]
+        def changed:boolean false
+        def i:int 0
+        while (i < (array_length parts)) {
+            def seg:string (itemAt parts i)
+            def next:string (XsMachine.join(here seg))
+            if ((next == renamed) && (seg == oldKey)) {
+                push out newKey
+                changed = true
+            } {
+                push out seg
+            }
+            here = next
+            i = (i + 1)
+        }
+        if (changed == false) {
+            return target
+        }
+        return (prefix + (join out "."))
+    }
+
+    ; A state goes, and with it the transitions that led into it (or into
+    ; anything inside it). The parent starts at its first remaining state
+    ; if it started at this one.
+    fn removeState:boolean (path:string) {
+        refused = ""
+        def so@(optional):XsState (machine.stateAt(path))
+        if ((null? so) || ((strlen path) == 0)) {
+            return (this.refuse(("no state " + path)))
+        }
+        def st:XsState (unwrap so)
+        ; transitions into it, from the states that stay
+        def i:int 0
+        while (i < (array_length machine.states)) {
+            def s:XsState (itemAt machine.states i)
+            def inside:boolean ((s.path == path) || ((indexOf s.path (path + ".")) == 0))
+            if (inside == false) {
+                def k:int ((array_length s.transitions) - 1)
+                while (k >= 0) {
+                    def t:XsTransition (itemAt s.transitions k)
+                    def into:boolean false
+                    def r:int 0
+                    while (r < (array_length t.resolved)) {
+                        def to:string (itemAt t.resolved r)
+                        if ((to == path) || ((indexOf to (path + ".")) == 0)) {
+                            into = true
+                        }
+                        r = (r + 1)
+                    }
+                    if into {
+                        this.dropTransition(s.path t)
+                    }
+                    k = (k - 1)
+                }
+            }
+            i = (i + 1)
+        }
+        def pn@(optional):XsJson (this.nodeOf(st.parent))
+        def p:XsJson (unwrap pn)
+        def kids:XsJson (p.get("states"))
+        kids.remove(st.key)
+        if ((p.stringOr("initial" "")) == st.key) {
+            if ((kids.count()) > 0) {
+                p.set("initial" (XsJson.text((kids.keyAt(0)))))
+            } {
+                p.remove("initial")
+            }
+        }
+        if ((kids.count()) == 0) {
+            p.remove("states")
+        }
+        this.reread()
+        return true
+    }
+
+    ; ------------------------------------------------------- transitions --
+    ; The list a transition is written in, by its kind and event: `on.EVENT`,
+    ; `always`, `after.DELAY`, `onDone`. Returns the owner object and the key
+    ; the list sits under in it.
+    fn ownerOf@(optional):XsJson (node:XsJson t:XsTransition) {
+        def found@(optional):XsJson
+        if (t.kind == "on") {
+            if (node.has("on")) {
+                found = (node.get("on"))
+            }
+            return found
+        }
+        if (t.kind == "after") {
+            if (node.has("after")) {
+                found = (node.get("after"))
+            }
+            return found
+        }
+        if ((t.kind == "always") || (t.kind == "done")) {
+            found = node
+        }
+        return found
+    }
+
+    sfn keyFor:string (t:XsTransition) {
+        if (t.kind == "always") {
+            return "always"
+        }
+        if (t.kind == "done") {
+            return "onDone"
+        }
+        return t.event
+    }
+
+    ; Take one alternative out of its list; a list left with one item is
+    ; written as that item, an empty one is removed.
+    fn dropTransition:void (source:string t:XsTransition) {
+        def sn@(optional):XsJson (this.nodeOf(source))
+        if (null? sn) {
+            return
+        }
+        def own@(optional):XsJson (this.ownerOf((unwrap sn) t))
+        if (null? own) {
+            return
+        }
+        def owner:XsJson (unwrap own)
+        def key:string (XsEdit.keyFor(t))
+        def spec:XsJson (owner.get(key))
+        if (spec.isArray()) {
+            spec.removeItem(t.alt)
+            if ((spec.count()) == 1) {
+                owner.set(key (spec.at(0)))
+            }
+            if ((spec.count()) == 0) {
+                owner.remove(key)
+            }
+        } {
+            owner.remove(key)
+        }
+        if (t.kind == "on") {
+            if ((owner.count()) == 0) {
+                def sNode:XsJson (unwrap sn)
+                sNode.remove("on")
+            }
+        }
+        if (t.kind == "after") {
+            if ((owner.count()) == 0) {
+                def aNode:XsJson (unwrap sn)
+                aNode.remove("after")
+            }
+        }
+    }
+
+    ; The target to write on `source` for the state at `target`: a sibling's
+    ; key, `.a.b` below the source, `#machine.a.b` anywhere else.
+    fn targetText:string (source:string target:string) {
+        def so@(optional):XsState (machine.stateAt(source))
+        def to@(optional):XsState (machine.stateAt(target))
+        if ((null? so) || (null? to)) {
+            return target
+        }
+        def s:XsState (unwrap so)
+        def t:XsState (unwrap to)
+        if (((strlen source) > 0) && (t.parent == s.parent)) {
+            return t.key
+        }
+        if ((strlen source) == 0) {
+            if ((strlen t.parent) == 0) {
+                return t.key
+            }
+        }
+        def keys:[string] (this.keysOf(target))
+        def mine:[string] (this.keysOf(source))
+        def below:boolean ((array_length keys) > (array_length mine))
+        def i:int 0
+        while (i < (array_length mine)) {
+            if ((itemAt keys i) != (itemAt mine i)) {
+                below = false
+            }
+            i = (i + 1)
+        }
+        if below {
+            def rest:[string]
+            def k:int (array_length mine)
+            while (k < (array_length keys)) {
+                push rest (itemAt keys k)
+                k = (k + 1)
+            }
+            return ("." + (join rest "."))
+        }
+        if ((strlen machine.id) == 0) {
+            ; `#…` needs the machine to have an id: one is given, at the
+            ; top, where a reader looks for it
+            def all:XsJson machine.doc
+            def fresh:XsJson (XsJson.object())
+            fresh.set("id" (XsJson.text("machine")))
+            def j:int 0
+            while (j < (all.count())) {
+                if ((all.keyAt(j)) != "id") {
+                    fresh.set((all.keyAt(j)) (all.valueAt(j)))
+                }
+                j = (j + 1)
+            }
+            machine.doc = fresh
+            machine.id = "machine"
+        }
+        return ("#" + machine.id + "." + (join keys "."))
+    }
+
+    ; One alternative, as XState writes it: the shorthand string when it is
+    ; only a target, an object otherwise.
+    sfn spec:XsJson (targetText:string guard:string actions:[string]) {
+        if (((strlen guard) == 0) && ((array_length actions) == 0)) {
+            if ((strlen targetText) > 0) {
+                return (XsJson.text(targetText))
+            }
+        }
+        def o:XsJson (XsJson.object())
+        if ((strlen targetText) > 0) {
+            o.set("target" (XsJson.text(targetText)))
+        }
+        if ((strlen guard) > 0) {
+            o.set("guard" (XsJson.text(guard)))
+        }
+        if ((array_length actions) == 1) {
+            o.set("actions" (XsJson.text((itemAt actions 0))))
+        }
+        if ((array_length actions) > 1) {
+            def list:XsJson (XsJson.array())
+            def i:int 0
+            while (i < (array_length actions)) {
+                push list.items (XsJson.text((itemAt actions i)))
+                i = (i + 1)
+            }
+            o.set("actions" list)
+        }
+        return o
+    }
+
+    ; "a, b ,c" → ["a", "b", "c"]
+    sfn splitNames:[string] (text:string) {
+        def out:[string]
+        def parts:[string] (strsplit text ",")
+        def i:int 0
+        while (i < (array_length parts)) {
+            def p:string (trim (itemAt parts i))
+            if ((strlen p) > 0) {
+                push out p
+            }
+            i = (i + 1)
+        }
+        return out
+    }
+
+    ; Append an alternative to `on.EVENT` of `source`: a new event, or the
+    ; last alternative of one already there.
+    fn addTransition:boolean (source:string event:string target:string guard:string actions:string) {
+        refused = ""
+        def ev:string (trim event)
+        if ((strlen ev) == 0) {
+            return (this.refuse("a transition needs an event"))
+        }
+        if (((strlen target) > 0) && ((machine.hasState(target)) == false)) {
+            return (this.refuse(("no state " + target)))
+        }
+        def sn@(optional):XsJson (this.nodeOf(source))
+        if (null? sn) {
+            return (this.refuse(("no state " + source)))
+        }
+        def node:XsJson (unwrap sn)
+        if ((node.stringOr("type" "")) == "final") {
+            return (this.refuse("a final state has no transitions out of it"))
+        }
+        def tt:string ""
+        if ((strlen target) > 0) {
+            tt = (this.targetText(source target))
+        }
+        def one:XsJson (XsEdit.spec(tt (trim guard) (XsEdit.splitNames(actions))))
+        def on:XsJson (node.get("on"))
+        if ((on.isObject()) == false) {
+            on = (XsJson.object())
+            if (node.has("states")) {
+                node.setAfter("on" on "initial")
+            } {
+                node.set("on" on)
+            }
+            if ((node.indexOfKey("on")) < 0) {
+                node.set("on" on)
+            }
+        }
+        if (on.has(ev)) {
+            def had:XsJson (on.get(ev))
+            if (had.isArray()) {
+                push had.items one
+            } {
+                def list:XsJson (XsJson.array())
+                push list.items had
+                push list.items one
+                on.set(ev list)
+            }
+        } {
+            on.set(ev one)
+        }
+        this.reread()
+        return true
+    }
+
+    ; The `index`-th transition written on `source` (the order of
+    ; `XsState.transitions`), removed.
+    fn removeTransition:boolean (source:string index:int) {
+        refused = ""
+        def so@(optional):XsState (machine.stateAt(source))
+        if (null? so) {
+            return (this.refuse(("no state " + source)))
+        }
+        def s:XsState (unwrap so)
+        if ((index < 0) || (index >= (array_length s.transitions))) {
+            return (this.refuse("no such transition"))
+        }
+        this.dropTransition(source (itemAt s.transitions index))
+        this.reread()
+        return true
+    }
+
+    ; Change the `index`-th transition on `source`: its target, guard and
+    ; actions in place, and, when the event's name changes, moved to the new
+    ; event (an `on` transition only).
+    fn setTransition:boolean (source:string index:int event:string target:string guard:string actions:string) {
+        refused = ""
+        def so@(optional):XsState (machine.stateAt(source))
+        if (null? so) {
+            return (this.refuse(("no state " + source)))
+        }
+        def s:XsState (unwrap so)
+        if ((index < 0) || (index >= (array_length s.transitions))) {
+            return (this.refuse("no such transition"))
+        }
+        if (((strlen target) > 0) && ((machine.hasState(target)) == false)) {
+            return (this.refuse(("no state " + target)))
+        }
+        def t:XsTransition (itemAt s.transitions index)
+        def ev:string (trim event)
+        if ((t.kind == "on") && (((strlen ev) > 0) && (ev != t.event))) {
+            this.dropTransition(source t)
+            this.reread()
+            return (this.addTransition(source ev target guard actions))
+        }
+        def tt:string ""
+        if ((strlen target) > 0) {
+            tt = (this.targetText(source target))
+        }
+        def sn@(optional):XsJson (this.nodeOf(source))
+        def own@(optional):XsJson (this.ownerOf((unwrap sn) t))
+        if (null? own) {
+            return (this.refuse("no such transition"))
+        }
+        def owner:XsJson (unwrap own)
+        def key:string (XsEdit.keyFor(t))
+        def spec:XsJson (owner.get(key))
+        def old:XsJson spec
+        if (spec.isArray()) {
+            old = (spec.at(t.alt))
+        }
+        ; what this does not edit (description, reenter, params) stays
+        def one:XsJson (XsEdit.spec(tt (trim guard) (XsEdit.splitNames(actions))))
+        if (old.isObject()) {
+            def kept:XsJson (old.copy())
+            kept.remove("target")
+            kept.remove("guard")
+            kept.remove("cond")
+            kept.remove("actions")
+            if ((kept.count()) > 0) {
+                def merged:XsJson (XsJson.object())
+                if ((strlen tt) > 0) {
+                    merged.set("target" (XsJson.text(tt)))
+                }
+                if ((strlen (trim guard)) > 0) {
+                    merged.set("guard" (XsJson.text((trim guard))))
+                }
+                def names:[string] (XsEdit.splitNames(actions))
+                if ((array_length names) > 0) {
+                    def withActions:XsJson (XsEdit.spec("" "" names))
+                    merged.set("actions" (withActions.get("actions")))
+                }
+                def k:int 0
+                while (k < (kept.count())) {
+                    merged.set((kept.keyAt(k)) (kept.valueAt(k)))
+                    k = (k + 1)
+                }
+                one = merged
+            }
+        }
+        if (spec.isArray()) {
+            set_at spec.items t.alt one
+        } {
+            owner.set(key one)
+        }
+        this.reread()
+        return true
+    }
+}

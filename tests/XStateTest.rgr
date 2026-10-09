@@ -1,0 +1,327 @@
+; SPDX-License-Identifier: AGPL-3.0-or-later
+; XState machine configs: reading (JSON and the createMachine literal), the
+; IR, target resolution, checks, edits and the drawing.
+;   npm run rangerflow:xstate:test
+Import "../domains/xstate/XsMachine.rgr"
+Import "../domains/xstate/XStateRender.rgr"
+Import "../domains/xstate/XsEdit.rgr"
+
+class XStateTest {
+    def fails:int 0
+    def passes:int 0
+
+    fn ok:void (cond:boolean what:string) {
+        if cond {
+            passes = (passes + 1)
+        } {
+            fails = (fails + 1)
+            print ("FAIL " + what)
+        }
+    }
+
+    ; Tero's machine as Stately exports it: bare keys, the config inside
+    ; createMachine(…), implementations in withConfig(…).
+    sfn statelyText:string () {
+        def q:string (strfromcode 34)
+        return ("import { createMachine } from " + q + "xstate" + q + ";\n\nexport const machine = createMachine({\n  context: {},\n  id: " + q + "Untitled" + q + ",\n  initial: " + q + "Initial state" + q + ",\n  states: {\n    " + q + "Initial state" + q + ": {\n      on: {\n        next: {\n          target: " + q + "Another state" + q + ",\n        },\n      },\n    },\n    " + q + "Another state" + q + ": {\n      on: {\n        next: [\n          {\n            target: " + q + "Parent state" + q + ",\n            guard: {\n              type: " + q + "some condition" + q + ",\n            },\n          },\n          {\n            target: " + q + "Initial state" + q + ",\n          },\n        ],\n      },\n    },\n    " + q + "Parent state" + q + ": {\n      initial: " + q + "Child state" + q + ",\n      on: {\n        back: {\n          target: " + q + "Initial state" + q + ",\n          actions: {\n            type: " + q + "reset" + q + ",\n          },\n        },\n      },\n      states: {\n        " + q + "Child state" + q + ": {\n          on: {\n            next: {\n              target: " + q + "Another child state" + q + ",\n            },\n          },\n        },\n        " + q + "Another child state" + q + ": {},\n      },\n    },\n  },\n}).withConfig({\n  actions: {\n    reset: function (context, event) {\n      // Add your action code here\n    },\n  },\n  guards: {\n    " + q + "some condition" + q + ": function (context, event) {\n      return true;\n    },\n  },\n});\n")
+    }
+
+    sfn review:string () {
+        return "{\n  \"id\": \"document-review\",\n  \"initial\": \"draft\",\n  \"states\": {\n    \"draft\": { \"on\": { \"SUBMIT\": \"testing\" } },\n    \"testing\": {\n      \"entry\": \"notifyTesters\",\n      \"on\": {\n        \"ACCEPT\": { \"target\": \"accepted\", \"guard\": \"role:tester\" },\n        \"REJECT\": { \"target\": \"draft\", \"actions\": [\"document:addComment\"] }\n      }\n    },\n    \"accepted\": { \"type\": \"final\" }\n  }\n}"
+    }
+
+    fn run:void () {
+        this.reading()
+        this.stately()
+        this.resolving()
+        this.checks()
+        this.labels()
+        this.drawing()
+        this.edits()
+        this.nested()
+    }
+
+    fn reading:void () {
+        def m:XsMachine (XsMachine.parse((XStateTest.review())))
+        this.ok((m.ok()) ("review reads: " + (m.refusal())))
+        this.ok((m.id == "document-review") "review: id")
+        this.ok(((m.stateCount()) == 3) ("review: 3 states, got " + (to_string (m.stateCount()))))
+        this.ok(((m.transitionCount()) == 3) "review: 3 transitions")
+        def t@(optional):XsState (m.stateAt("testing"))
+        this.ok((!null? t) "review: testing exists")
+        if (!null? t) {
+            def ts:XsState (unwrap t)
+            this.ok(((array_length ts.entry) == 1) "testing: one entry action")
+            def acc:XsTransition (itemAt ts.transitions 0)
+            this.ok((acc.guard == "role:tester") "ACCEPT: guard name")
+            this.ok(((itemAt acc.resolved 0) == "accepted") "ACCEPT: resolved")
+            def rej:XsTransition (itemAt ts.transitions 1)
+            this.ok(((itemAt rej.actions 0) == "document:addComment") "REJECT: action")
+        }
+        def a@(optional):XsState (m.stateAt("accepted"))
+        if (!null? a) {
+            def as:XsState (unwrap a)
+            this.ok((as.type == "final") "accepted is final")
+        }
+        this.ok(((m.errorCount()) == 0) "review: no errors")
+
+        def bad:XsMachine (XsMachine.parse("{\n  \"id\": \"x\",\n  \"states\": {\n    \"a\": { \"on\": { \"GO\" \"b\" } }\n  }\n}"))
+        this.ok(((m.ok()) && ((bad.ok()) == false)) "a missing colon is refused")
+        this.ok((bad.readErrorLine == 4) ("the refusal names line 4, got " + (to_string bad.readErrorLine)))
+        def fnIn:XsMachine (XsMachine.parse("{ states: { a: { on: { GO: { target: 'a', guard: (c) => true } } } } }"))
+        this.ok(((indexOf (fnIn.refusal()) "function") >= 0) ("an inline function is named: " + (fnIn.refusal())))
+        def empty:XsMachine (XsMachine.parse("{ \"id\": \"e\" }"))
+        this.ok(((empty.ok()) == false) "no states: nothing to draw")
+    }
+
+    fn stately:void () {
+        def m:XsMachine (XsMachine.parse((XStateTest.statelyText())))
+        this.ok((m.ok()) ("Stately export reads: " + (m.refusal())))
+        this.ok((m.id == "Untitled") "Stately: id")
+        this.ok(((m.stateCount()) == 5) ("Stately: 5 states, got " + (to_string (m.stateCount()))))
+        def an@(optional):XsState (m.stateAt("Another state"))
+        if (!null? an) {
+            def s:XsState (unwrap an)
+            this.ok(((array_length s.transitions) == 2) "Another state: two alternatives")
+            def first:XsTransition (itemAt s.transitions 0)
+            this.ok(((first.guard == "some condition") && ((first.alt == 0) && (first.alts == 2))) "first alternative guarded, 1 of 2")
+        }
+        def p@(optional):XsState (m.stateAt("Parent state"))
+        if (!null? p) {
+            def ps:XsState (unwrap p)
+            this.ok((ps.type == "compound") "Parent state is compound")
+            this.ok(((ps.initialChild()) == "Parent state.Child state") "Parent state starts in Child state")
+            def back:XsTransition (itemAt ps.transitions 0)
+            this.ok(((itemAt back.actions 0) == "reset") "back runs reset")
+        }
+        def c@(optional):XsState (m.stateAt("Parent state.Child state"))
+        if (!null? c) {
+            def cs:XsState (unwrap c)
+            def nx:XsTransition (itemAt cs.transitions 0)
+            this.ok(((itemAt nx.resolved 0) == "Parent state.Another child state") "a child's target is its sibling")
+        }
+    }
+
+    fn resolving:void () {
+        def src:string "{ id: 'm', initial: 'a', on: { RESET: '.a' }, states: { a: { id: 'start', on: { IN: 'b.deep', JUMP: '#start', UP: '#m.c' } }, b: { initial: 'deep', states: { deep: { on: { OUT: '#start', SIB: 'other' } }, other: {} } }, c: { type: 'final' } } }"
+        def m:XsMachine (XsMachine.parse(src))
+        this.ok((m.ok()) ("resolve machine reads: " + (m.refusal())))
+        def a:XsState (unwrap (m.stateAt("a")))
+        this.ok(((XStateTest.to(a 0)) == "b.deep") "name.child below a sibling")
+        this.ok(((XStateTest.to(a 1)) == "a") "#id")
+        this.ok(((XStateTest.to(a 2)) == "c") "#machine.child")
+        def deep:XsState (unwrap (m.stateAt("b.deep")))
+        this.ok(((XStateTest.to(deep 1)) == "b.other") "bare name = sibling")
+        def r:XsTransition (itemAt m.root.transitions 0)
+        this.ok(((itemAt r.resolved 0) == "a") "machine on: .child")
+        this.ok(((m.errorCount()) == 0) ("no errors in resolve machine, got " + (to_string (m.errorCount()))))
+    }
+
+    fn checks:void () {
+        def m:XsMachine (XsMachine.parse("{ initial: 'a', states: { a: { on: { GO: 'nowhere', X: [ { target: 'b' }, { target: 'a', guard: 'late' } ] } }, b: { type: 'final', on: { BACK: 'a' } }, p: { initial: 'zz', states: { q: {} } } } }"))
+        this.ok(((m.errorCount()) == 3) ("three errors (target, final out, initial), got " + (to_string (m.errorCount()))))
+        def warned:boolean false
+        def i:int 0
+        while (i < (array_length m.issues)) {
+            def x:XsIssue (itemAt m.issues i)
+            if ((x.level == "warning") && ((indexOf x.message "never run") >= 0)) {
+                warned = true
+            }
+            i = (i + 1)
+        }
+        this.ok(warned "an unguarded alternative before the last is warned")
+    }
+
+    fn labels:void () {
+        def m:XsMachine (XsMachine.parse((XStateTest.statelyText())))
+        def an:XsState (unwrap (m.stateAt("Another state")))
+        def t0:XsTransition (itemAt an.transitions 0)
+        def t1:XsTransition (itemAt an.transitions 1)
+        this.ok(((t0.label()) == "1. next [some condition]") ("label 1: " + (t0.label())))
+        this.ok(((t1.label()) == "2. next [else]") ("label 2: " + (t1.label())))
+        def p:XsState (unwrap (m.stateAt("Parent state")))
+        this.ok(((XStateTest.lab(p 0)) == "back / reset") "label with action")
+        def d:XsMachine (XsMachine.parse("{ initial: 'a', states: { a: { after: { 2000: 'b', 1500: 'b' }, always: { target: 'b', guard: 'done' } }, b: {} } }"))
+        def a:XsState (unwrap (d.stateAt("a")))
+        this.ok(((XStateTest.lab(a 0)) == "always [done]") ("always: " + (XStateTest.lab(a 0))))
+        this.ok(((XStateTest.lab(a 1)) == "after 2s") ("after 2s: " + (XStateTest.lab(a 1))))
+        this.ok(((XStateTest.lab(a 2)) == "after 1500ms") "after 1500ms")
+    }
+
+    ; Drawn: a box per state the machine can be in, a frame per compound
+    ; state, a start dot per level, an arrow per transition.
+    fn drawing:void () {
+        def m:XsMachine (XsMachine.parse((XStateTest.statelyText())))
+        def st (new FlowStyle)
+        def dr:MermaidDrawing (XStateRender.drawMachine(m st (new FlowLayoutMemo)))
+        this.ok(dr.ok "Stately machine draws")
+        def g:FlowGraph dr.graph
+        def boxes:int 0
+        def frames:int 0
+        def dots:int 0
+        def labels:[string]
+        def i:int 0
+        while (i < (g.nodeCount())) {
+            def n:FlowNode (g.nodeAt(i))
+            if (n.nodeType == "group") {
+                frames = (frames + 1)
+                push labels n.label
+            } {
+                if (n.shape == "circle") {
+                    dots = (dots + 1)
+                } {
+                    boxes = (boxes + 1)
+                    push labels n.label
+                }
+            }
+            i = (i + 1)
+        }
+        this.ok((boxes == 4) ("4 boxes (Parent state is a frame), got " + (to_string boxes) + ": " + (join labels ", ")))
+        this.ok((frames == 1) ("1 frame, got " + (to_string frames)))
+        this.ok((dots == 2) ("2 start dots, got " + (to_string dots)))
+        def shown:int 0
+        def edgeLabels:[string]
+        def k:int 0
+        while (k < (g.edgeCount())) {
+            def e:FlowEdge (g.edgeAt(k))
+            if (e.hidden == false) {
+                shown = (shown + 1)
+                push edgeLabels e.label
+            }
+            k = (k + 1)
+        }
+        ; next, 1. next, 2. next, back, next (child), and the two dots' arrows
+        this.ok((shown == 7) ("7 arrows, got " + (to_string shown) + ": " + (join edgeLabels " | ")))
+        def back:boolean false
+        def b:int 0
+        while (b < (g.edgeCount())) {
+            def e2:FlowEdge (g.edgeAt(b))
+            if ((e2.label == "back / reset") && (e2.source == "sg-x3")) {
+                back = true
+            }
+            b = (b + 1)
+        }
+        this.ok(back "back leaves the Parent state frame")
+        def sc:FlowScene (XStateRender.sceneOf((XStateTest.review()) "" 800.0 8.0))
+        this.ok((sc.worldW > 0.0) "the review machine makes a scene")
+        def none:FlowScene (XStateRender.sceneOf("{ id: 'x' }" "" 800.0 8.0))
+        this.ok((none.worldW <= 0.0) "no states: an empty scene")
+    }
+
+    ; Edits change the tree and only what they name.
+    fn edits:void () {
+        def e:XsEdit (XsEdit.of((XStateTest.review())))
+        this.ok((e.ok()) "edit: reads")
+        this.ok((e.renameState("draft" "luonnos")) ("rename: " + e.refused))
+        def m:XsMachine e.machine
+        this.ok(((m.hasState("luonnos")) && ((m.hasState("draft")) == false)) "rename: the state has the new name")
+        this.ok(((m.doc.stringOr("initial" "")) == "luonnos") "rename: initial follows")
+        def t:XsState (unwrap (m.stateAt("testing")))
+        this.ok(((XStateTest.to(t 1)) == "luonnos") "rename: REJECT still reaches it")
+        this.ok(((m.errorCount()) == 0) "rename: no errors")
+        def text:string (e.text())
+        this.ok(((indexOf text "notifyTesters") > 0) "rename: what was not edited stays")
+        this.ok(((indexOf text "\"draft\"") < 0) "rename: no old name left")
+        this.ok(((indexOf text "\"ACCEPT\": { \"target\": \"accepted\", \"guard\": \"role:tester\" }") > 0) ("a short transition stays on one line: " + text))
+
+        this.ok((e.addState("" "archived")) "add state")
+        this.ok(((e.addTransition("accepted" "ARCHIVE" "archived" "" "")) == false) "a final state has no way out")
+        this.ok((e.addTransition("testing" "ARCHIVE" "archived" "role:admin" "log, notify")) ("add transition: " + e.refused))
+        def t2:XsState (unwrap (e.machine.stateAt("testing")))
+        def arch:XsTransition (itemAt t2.transitions 2)
+        this.ok((((arch.guard == "role:admin") && ((array_length arch.actions) == 2)) && ((itemAt arch.resolved 0) == "archived")) "added: guard, two actions, target")
+        this.ok((e.addTransition("testing" "ACCEPT" "luonnos" "" "")) "a second ACCEPT alternative")
+        def t3:XsState (unwrap (e.machine.stateAt("testing")))
+        def acc2:XsTransition (itemAt t3.transitions 1)
+        this.ok(((acc2.alts == 2) && ((acc2.label()) == "2. ACCEPT [else]")) ("alternative label: " + (acc2.label())))
+
+        this.ok((e.setTransition("testing" 0 "ACCEPT" "archived" "role:lead" "")) ("set transition: " + e.refused))
+        def t4:XsState (unwrap (e.machine.stateAt("testing")))
+        def g4:XsTransition (itemAt t4.transitions 0)
+        this.ok((g4.guard == "role:lead") "set: guard changed")
+        this.ok(((XStateTest.to(t4 0)) == "archived") "set: target changed")
+        this.ok((e.setTransition("testing" 2 "OK" "luonnos" "" "")) ("rename event: " + e.refused))
+        def t5:XsState (unwrap (e.machine.stateAt("testing")))
+        def last:XsTransition (itemAt t5.transitions ((array_length t5.transitions) - 1))
+        this.ok((last.event == "OK") ("event renamed: " + last.event))
+
+        this.ok((e.removeState("archived")) "remove state")
+        def t6:XsState (unwrap (e.machine.stateAt("testing")))
+        def into:int 0
+        def k:int 0
+        while (k < (array_length t6.transitions)) {
+            if ((XStateTest.to(t6 k)) == "archived") {
+                into = (into + 1)
+            }
+            k = (k + 1)
+        }
+        this.ok((into == 0) "remove: the transitions into it went too")
+        this.ok(((e.machine.errorCount()) == 0) ("remove: no errors, got " + (to_string (e.machine.errorCount()))))
+        this.ok((e.removeTransition("testing" 0)) "remove transition")
+        this.ok((e.setFinal("luonnos" false)) "set final off (no-op)")
+        this.ok((e.setInitial("" "testing")) "set initial")
+        this.ok(((e.machine.doc.stringOr("initial" "")) == "testing") "initial set")
+        def back:XsMachine (XsMachine.parse((e.text())))
+        this.ok(((back.stateCount()) == (e.machine.stateCount())) "the written text reads back the same")
+
+        ; a target in another branch is written #machine.path; a machine
+        ; without an id is given one
+        def n:XsEdit (XsEdit.of("{ initial: 'a', states: { a: {}, p: { initial: 'q', states: { q: {} } } } }"))
+        this.ok((n.addTransition("a" "IN" "p.q" "" "")) "add across levels")
+        def na:XsState (unwrap (n.machine.stateAt("a")))
+        def ins:XsTransition (itemAt na.transitions 0)
+        this.ok(((itemAt ins.targets 0) == "#machine.p.q") ("written as #machine.p.q: " + (itemAt ins.targets 0)))
+        this.ok(((itemAt ins.resolved 0) == "p.q") "and it resolves")
+        this.ok((n.renameState("p" "parent")) "rename a parent")
+        def na2:XsState (unwrap (n.machine.stateAt("a")))
+        this.ok(((XStateTest.to(na2 0)) == "parent.q") "a target through it follows")
+        this.ok(((n.renameState("a" "b.c")) == false) "a name with a dot is refused")
+    }
+
+    ; A link to a group whose only members are groups (a parallel state's
+    ; regions) reaches its frame, with no stand-in box left over.
+    fn nested:void () {
+        def src:string "{ initial: 'p', states: { p: { type: 'parallel', states: { r1: { initial: 'a', states: { a: {} } }, r2: { initial: 'b', states: { b: {} } } }, on: { X: 'z' } }, z: { on: { BACK: 'p' } } } }"
+        def dr:MermaidDrawing (XStateRender.drawMachine((XsMachine.parse(src)) (new FlowStyle) (new FlowLayoutMemo)))
+        this.ok(dr.ok "parallel draws")
+        def strays:int 0
+        def i:int 0
+        while (i < (dr.graph.nodeCount())) {
+            def nd:FlowNode (dr.graph.nodeAt(i))
+            if ((nd.nodeType != "group") && ((indexOf nd.label "x") == 0)) {
+                strays = (strays + 1)
+            }
+            i = (i + 1)
+        }
+        this.ok((strays == 0) ("no stand-in box for the parallel state, got " + (to_string strays)))
+        def toFrame:boolean false
+        def k:int 0
+        while (k < (dr.graph.edgeCount())) {
+            def e:FlowEdge (dr.graph.edgeAt(k))
+            if ((e.label == "BACK") && (e.target == "sg-x1")) {
+                toFrame = true
+            }
+            k = (k + 1)
+        }
+        this.ok(toFrame "BACK arrives at the parallel state's frame")
+    }
+
+    sfn to:string (s:XsState i:int) {
+        def t:XsTransition (itemAt s.transitions i)
+        return (itemAt t.resolved 0)
+    }
+
+    sfn lab:string (s:XsState i:int) {
+        def t:XsTransition (itemAt s.transitions i)
+        return (t.label())
+    }
+
+    sfn main:void () {
+        def t (new XStateTest)
+        t.run()
+        print ("xstate: " + (to_string t.passes) + " passed, " + (to_string t.fails) + " failed")
+        if (t.fails > 0) {
+            print "CHECK FAILED"
+        }
+    }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "document-review",
+  "initial": "draft",
+  "states": {
+    "draft": {
+      "on": { "SUBMIT": "testing" }
+    },
+    "testing": {
+      "entry": "notifyTesters",
+      "on": {
+        "ACCEPT": { "target": "accepted", "guard": "role:tester" },
+        "REJECT": { "target": "draft", "actions": ["document:addComment"] }
+      }
+    },
+    "accepted": { "type": "final" }
+  }
+}
