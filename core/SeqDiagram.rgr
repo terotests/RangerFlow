@@ -233,6 +233,18 @@ class SeqDiagramFlow {
     def minCol:double 132.0
     def msgStep:double 48.0
     def selfDrop:double 36.0
+    def blockHead:double 46.0
+    ; ON A SLIDE (`FlowStyle.textFill`): the text is to grow, and a sequence
+    ; is a column of rows, so it is drawn as large as its HEIGHT allows. The
+    ; boxes were as wide as their names at the document's size, which let
+    ; `FlowView.fillText` grow them by a third at most, and the rows were
+    ; spaced for that size: fitted to a slide's room the text stayed 15 px.
+    ; Measured for the grown text instead — the names' boxes wider, a row as
+    ; far below the last as a grown label needs, the gaps between the
+    ; columns as wide as the messages written across them — the diagram
+    ; gets wider, hardly taller, and its text grows with the room.
+    def textGrow:double 1.0
+    def labelGrow:double 1.0
 
     Constructor () {
     }
@@ -241,7 +253,37 @@ class SeqDiagramFlow {
         def f (new SeqDiagramFlow)
         f.doc = d
         f.style = style
+        f.measure()
         return (f.run())
+    }
+
+    ; How much higher a grown message name reaches above its arrow than one
+    ; at its own size: `FlowView.edgeLabelPlace` keeps its foot where it was
+    ; and lets it grow upwards.
+    fn labelLift:double () {
+        return ((11.0 * (labelGrow - 1.0)) * 1.8)
+    }
+
+    ; The sizes the text will be drawn at, and the rows and boxes for them.
+    fn measure:void () {
+        if (style.textFill > 1.0) {
+            textGrow = style.textFill
+            labelGrow = (style.labelMost())
+            if (labelGrow < 1.0) {
+                labelGrow = 1.0
+            }
+        }
+        def nameH:double ((13.0 * textGrow) * 1.2)
+        if ((nameH + 12.0) > headerH) {
+            headerH = (nameH + 12.0)
+        }
+        def labelH:double ((11.0 * labelGrow) * 1.2)
+        if ((labelH + 26.0) > msgStep) {
+            msgStep = (labelH + 26.0)
+        }
+        if ((nameH + 16.0) > blockHead) {
+            blockHead = (nameH + 16.0)
+        }
     }
 
     fn run:FlowGraph () {
@@ -259,7 +301,7 @@ class SeqDiagramFlow {
             }
             k = (k + 1)
         }
-        cursor = (headerH + 34.0)
+        cursor = ((headerH + 34.0) + (this.labelLift()))
         def s:int 0
         while (s < (array_length doc.steps)) {
             def st:SeqStep (itemAt doc.steps s)
@@ -292,7 +334,7 @@ class SeqDiagramFlow {
         def i:int 0
         while (i < (array_length doc.actors)) {
             def a:SeqActor (itemAt doc.actors i)
-            def w:double ((SeqDiagramFlow.textWidth(a.name 13.0)) + 40.0)
+            def w:double ((SeqDiagramFlow.textWidth(a.name (13.0 * textGrow))) + 40.0)
             if (w < minCol) {
                 w = minCol
             }
@@ -302,6 +344,46 @@ class SeqDiagramFlow {
             a.bottom = -1.0
             x = ((x + w) + colGap)
             i = (i + 1)
+        }
+        if (labelGrow > 1.0) {
+            this.roomForLabels()
+        }
+    }
+
+    ; A message's name is written along its arrow, between the two lines:
+    ; where the grown name is longer than that, the columns from the
+    ; farther one on move right by what it lacks.
+    fn roomForLabels:void () {
+        def s:int 0
+        while (s < (array_length doc.steps)) {
+            def st:SeqStep (itemAt doc.steps s)
+            s = (s + 1)
+            if (st.kind != "message") {
+                continue
+            }
+            def si:int (doc.indexOfActor(st.source))
+            def ti:int (doc.indexOfActor(st.target))
+            if ((si < 0) || ((ti < 0) || (si == ti))) {
+                continue
+            }
+            def lo:int si
+            def hi:int ti
+            if (ti < si) {
+                lo = ti
+                hi = si
+            }
+            def a:SeqActor (itemAt doc.actors lo)
+            def b:SeqActor (itemAt doc.actors hi)
+            def need:double ((SeqDiagramFlow.textWidth(st.text (11.0 * labelGrow))) + 32.0)
+            def lack:double (need - ((b.centerX()) - (a.centerX())))
+            if (lack > 0.0) {
+                def k:int hi
+                while (k < (array_length doc.actors)) {
+                    def c:SeqActor (itemAt doc.actors k)
+                    c.x = (c.x + lack)
+                    k = (k + 1)
+                }
+            }
         }
     }
 
@@ -550,9 +632,13 @@ class SeqDiagramFlow {
         def a:SeqActor (itemAt doc.actors si)
         def b:SeqActor (itemAt doc.actors ti)
         def lines:int (SeqDiagramFlow.lineCount(st.text))
-        def h:double (34.0 + ((to_double (lines - 1)) * 16.0))
+        def lineH:double ((12.0 * textGrow) * 1.3)
+        def h:double ((lineH + 18.0) + ((to_double (lines - 1)) * lineH))
+        if (h < (34.0 + ((to_double (lines - 1)) * 16.0))) {
+            h = (34.0 + ((to_double (lines - 1)) * 16.0))
+        }
         def x:double 0.0
-        def w:double 190.0
+        def w:double (190.0 * textGrow)
         if (st.placement == "right") {
             x = ((a.centerX()) + 18.0)
         } {
@@ -560,9 +646,9 @@ class SeqDiagramFlow {
                 x = (((a.centerX()) - 18.0) - w)
             } {
                 if (si == ti) {
-                    w = ((SeqDiagramFlow.textWidth(st.text 12.0)) + 34.0)
+                    w = ((SeqDiagramFlow.textWidth(st.text (12.0 * textGrow))) + 34.0)
                     if (w < 150.0) { w = 150.0 }
-                    if (w > 260.0) { w = 260.0 }
+                    if (w > (260.0 * textGrow)) { w = (260.0 * textGrow) }
                     x = ((a.centerX()) - (w * 0.5))
                 } {
                     x = ((a.centerX()) - 24.0)
@@ -583,7 +669,8 @@ class SeqDiagramFlow {
         n.syncFromModel()
         g.addNode(n)
         this.touch(x (x + w))
-        cursor = ((cursor + h) + 18.0)
+        ; the next arrow's name stands above it
+        cursor = (((cursor + h) + 18.0) + (this.labelLift()))
     }
 
     ; The end of a lifeline, drawn as the cross both formats draw: not a shape the
@@ -741,7 +828,7 @@ class SeqDiagramFlow {
             label = ((st.blockKind + "  ") + st.text)
         }
         push blockLabel label
-        cursor = (cursor + 46.0)
+        cursor = (cursor + blockHead)
     }
 
     fn divider:void (st:SeqStep) {
