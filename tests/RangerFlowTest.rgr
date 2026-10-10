@@ -7909,6 +7909,33 @@ class RangerFlowTest {
         def boxBig:double (RangerFlowTest.largestText(lsc "node:A"))
         def boxWas:double (RangerFlowTest.largestText(plain "node:A"))
         c.ok(("labelFill caps a line's name: " + (to_string nameWas) + " -> " + (to_string nameBig) + ", box " + (to_string boxWas) + " -> " + (to_string boxBig)) (((nameBig <= ((nameWas * 1.2) + 0.01)) && (boxBig > (boxWas * 1.3))) && (nameBig > 0.0)))
+        ; A sequence on a slide: its boxes and rows are measured for the
+        ; grown text, so the names grow as far as asked and the messages as
+        ; far as `labelFill`, while the drawing gets hardly taller (it was
+        ; height-bound and stayed 15 px on a slide).
+        def seq:string "sequenceDiagram\n  participant A as Avustaja\n  participant T as render_slide\n  participant C as Check\n  participant V as fxvm.go\n  A->>T: slide, time\n  T->>C: checkWith\n  C-->>T: listat + ohjelmat\n  opt dia nimellä + time\n    T->>C: checkWith uudelleen\n    C-->>T: listat\n  end\n  T->>V: jokainen pikseli\n  Note over T,V: ei aikarajaa\n  V-->>T: kuva\n  T-->>A: JPEG + raportti\n"
+        def qst:FlowStyle (FlowStyle.named("default"))
+        qst.textFill = 2.4
+        qst.labelFill = 1.8
+        def qbig:FlowScene (MermaidRender.sceneStyled(seq qst 0.0 8.0))
+        def qwas:FlowScene (MermaidRender.sceneStyled(seq (FlowStyle.named("default")) 0.0 8.0))
+        def qName:double ((RangerFlowTest.largestText(qbig "node:T")) / (RangerFlowTest.largestText(qwas "node:T")))
+        def qMsg:double ((RangerFlowTest.largestEdgeText(qbig)) / (RangerFlowTest.largestEdgeText(qwas)))
+        c.ok(("a sequence's names grow on a slide: " + (to_string qName)) (qName > 2.2))
+        c.ok(("…and its messages as far as labelFill: " + (to_string qMsg)) ((qMsg > 1.75) && (qMsg < 1.81)))
+        c.ok(("…while it gets hardly taller: " + (to_string qwas.worldH) + " -> " + (to_string qbig.worldH)) (qbig.worldH < (qwas.worldH * 1.25)))
+        def frameRole:string ""
+        def lineRole:string ""
+        for qbig.items qit:SceneItem qi {
+            if ((qit.tag == "node:sg-block0") && (qit.kind == 0) && ((strlen frameRole) == 0)) {
+                frameRole = qit.role
+            }
+            if ((qit.tag == "node:ll-C") && (qit.kind == 0)) {
+                lineRole = qit.role
+            }
+        }
+        c.eqStr("the opt block says it is a frame" frameRole "group")
+        c.eqStr("a lifeline says it is one" lineRole "lifeline")
         ; Spacing: the gaps given back, the boxes as they were.
         def chain:string "flowchart LR\n  A[Liidi] --> B[Ensikauppa] --> C[Onboarding] --> D[Asiakas]\n"
         def wide:FlowScene (MermaidRender.sceneStyled(chain (FlowStyle.named("default")) 0.0 8.0))

@@ -200,6 +200,12 @@ class SceneItem {
     ; a tag the hit tester and the tests read: "node:<id>", "edge:<id>",
     ; "port:<id>", "chrome"
     def tag:string ""
+    ; What a node's body is when it is not a box of its own: "group" (a
+    ; frame drawn behind what it holds: a subgraph, a lane, a sequence's
+    ; `loop`/`opt` block) or "lifeline" (a sequence participant's line).
+    ; A host that paints its own look keeps a frame see-through and writes
+    ; over a lifeline as over a line, not around it as around a box.
+    def role:string ""
 
     Constructor () {
     }

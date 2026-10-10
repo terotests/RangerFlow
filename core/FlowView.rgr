@@ -1647,7 +1647,9 @@ class FlowView {
                 def path:EdgePath (EdgeRouter.route(graph e))
                 path.flatten(12)
                 def size:double (this.sl((theme.labelFontSize * scale)))
-                def lay:FlowTextLayout (this.layoutText(e.label size (this.sl(160.0)) 0.0 2))
+                ; the line as wide as the text grew: broken where it broke
+                ; at its own size, not onto a second line that meets the next
+                def lay:FlowTextLayout (this.layoutText(e.label size (this.sl((160.0 * scale))) 0.0 2))
                 def at:[double] (this.edgeLabelPlace(e path lay grow))
                 push boxes ((itemAt at 0) - ((itemAt at 2) * 0.5))
                 push boxes ((itemAt at 1) - ((itemAt at 3) * 0.5))
@@ -1681,7 +1683,10 @@ class FlowView {
             def i:int 0
             while (i < (graph.nodeCount())) {
                 def n:FlowNode (graph.nodeAt(i))
-                if ((n.hidden == false) && (n.nodeType != "group")) {
+                ; a sequence's lifeline is a line drawn behind, not a box: a
+                ; message across three participants is written over the
+                ; middle one's, and counted, it kept every name at its size
+                if ((n.hidden == false) && ((n.nodeType != "group") && (n.nodeType != "lifeline"))) {
                     if (FlowView.boxesMeet(ax ay aw ah (this.sx(n.x)) (this.sy(n.y)) (this.sl(n.width)) (this.sl(n.height)))) {
                         count = (count + 1)
                     }
@@ -1715,7 +1720,8 @@ class FlowView {
         ; An edge label has no box to fill, so it is given a generous line and
         ; allowed a second one — "changes requested" reads better stacked than
         ; strung across three nodes.
-        def lay:FlowTextLayout (this.layoutText(raw size (this.sl(160.0)) 0.0 2))
+        ; grown by `fillText`, the line grows with it (`edgeLabelBoxes`)
+        def lay:FlowTextLayout (this.layoutText(raw size (this.sl((160.0 * labelGrow))) 0.0 2))
         ; placed for the size the model knew, grown by `fillText`
         def at:[double] (this.edgeLabelPlace(e path lay labelGrow))
         def mx:double (itemAt at 0)
@@ -1899,6 +1905,9 @@ class FlowView {
         body.strokeWidth = bw
         body.own = n.ownFill
         body.tag = tag
+        if (n.nodeType == "lifeline") {
+            body.role = "lifeline"
+        }
         if (n.borderDash > 0.0) {
             ; A rectangle in the display list has a solid border or none, so
             ; a dashed one is the box without its border and the border as a
@@ -2094,6 +2103,7 @@ class FlowView {
         body.stroke = border
         body.strokeWidth = bw
         body.tag = tag
+        body.role = "group"
         ; A band with nothing written in it is a stripe. An unnamed frame — a
         ; plot area, a quadrant, a box drawn only to say "these belong
         ; together" — is a plain box, and the band comes back with the name.
