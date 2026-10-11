@@ -7928,6 +7928,21 @@ class RangerFlowTest {
         c.ok(("a sequence's names grow on a slide: " + (to_string qName)) (qName > 2.2))
         c.ok(("…and its messages as far as labelFill: " + (to_string qMsg)) ((qMsg > 1.75) && (qMsg < 1.81)))
         c.ok(("…while it gets hardly taller: " + (to_string qwas.worldH) + " -> " + (to_string qbig.worldH)) (qbig.worldH < (qwas.worldH * 1.25)))
+        ; A flowchart across a slide: the gap a named arrow is drawn in
+        ; grows to its name, the others stay the gap they were. One gap for
+        ; all set "gathers up the courage" under the boxes either side.
+        def gst:FlowStyle (FlowStyle.named("default"))
+        gst.textFill = 1.8
+        def gd:MermaidDiagram (MermaidReader.parse("flowchart LR\n  A[Boy meets girl] -.->|gathers up the courage| B((Boy asks girl on a date))\n  B -.-> C[They kiss]\n"))
+        def gg:FlowGraph (MermaidFlow.styled(gd gst))
+        def ga:FlowNode (gg.nodeById("A"))
+        def gb:FlowNode (gg.nodeById("B"))
+        def gc:FlowNode (gg.nodeById("C"))
+        def named:double (gb.x - (ga.x + ga.width))
+        def unnamed:double (gc.x - (gb.x + gb.width))
+        def needs:double (((22.0 * 6.6) * 1.8) + 48.0)
+        c.ok(("a named arrow's gap holds its name: " + (to_string named) + " >= " + (to_string needs)) (named >= (needs - 0.5)))
+        c.ok(("…and an unnamed one keeps the gap it had: " + (to_string unnamed)) ((unnamed < named) && (unnamed >= 100.0)))
         def frameRole:string ""
         def lineRole:string ""
         for qbig.items qit:SceneItem qi {
