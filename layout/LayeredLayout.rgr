@@ -147,6 +147,10 @@ class LayeredLayout {
     ; the boxes either side: `minLayerGap` only holds a gap when it closes,
     ; never widens one that started narrower.
     def labelGapsGrow:boolean false
+    ; With `labelGapsGrow`, what a label needs past its text on the stretch
+    ; it is written on when its arrow turns in the gap: the chip's own
+    ; margin and some clear line between it and the node or the turn.
+    def labelTurnPad:double 30.0
     ; Packing each layer and centring it on the widest one puts a chain of
     ; five nodes that hangs off the first node of a row in the middle of the
     ; page, under the third. With this on, every vertex is then moved
@@ -275,6 +279,11 @@ class LayeredLayout {
         this.buildVertices()
         this.orderVertices()
         this.assignCoordinates()
+        ; which named arrows turn in their gap is known once the nodes
+        ; have places: lay the gaps out again with that (`layerGaps`)
+        if (labelGapsGrow && ((this.longestLabel()) > 0)) {
+            this.assignCoordinates()
+        }
         if squareUp {
             if (this.closeGaps()) {
                 this.assignCoordinates()
@@ -392,6 +401,20 @@ class LayeredLayout {
                             along = labelAlongMost
                         }
                         def room:double (along + labelGapPad)
+                        ; an arrow that turns in the gap has its name on a
+                        ; level stretch one side of the turn, and the
+                        ; tracks between: "no" off a decision was set over
+                        ; the line back to the loop's start
+                        if ((labelGapsGrow && (span == 1)) && ((this.canBeStraight(e)) == false)) {
+                            def busy2:int (itemAt tracks lo)
+                            if (busy2 < 1) {
+                                busy2 = 1
+                            }
+                            def turning:double (((along + labelTurnPad) * 2.0) + ((to_double (busy2 - 1)) * 14.0))
+                            if (turning > room) {
+                                room = turning
+                            }
+                        }
                         ; a longer arrow's name goes where it costs least:
                         ; the gap it crosses that is narrowest so far, the
                         ; middle one of equals
