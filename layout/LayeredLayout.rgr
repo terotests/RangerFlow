@@ -140,6 +140,13 @@ class LayeredLayout {
     def labelCharW:double 6.6
     def labelAlongMost:double 160.0
     def labelGapPad:double 48.0
+    ; Only the gaps that hold a label sized for it: every gap is `layerGap`
+    ; (which `closeGaps` may still narrow), and a gap a label is written in
+    ; grows to that label as `labelGaps` measures it. A flowchart across a
+    ; slide had one gap for all, and a label longer than it was set under
+    ; the boxes either side: `minLayerGap` only holds a gap when it closes,
+    ; never widens one that started narrower.
+    def labelGapsGrow:boolean false
     ; Packing each layer and centring it on the widest one puts a chain of
     ; five nodes that hangs off the first node of a row in the middle of the
     ; page, under the third. With this on, every vertex is then moved
@@ -345,12 +352,12 @@ class LayeredLayout {
             push out layerGap
             i = (i + 1)
         }
-        if ((labelGaps == false) || (lc < 2)) {
+        if (((labelGaps == false) && (labelGapsGrow == false)) || (lc < 2)) {
             return out
         }
         def tracks:[int] (this.corridorCounts())
         def g:int 0
-        while (g < (array_length out)) {
+        while (labelGaps && (g < (array_length out))) {
             def need:double labelGapFloor
             def busy:int (itemAt tracks g)
             if (busy < 1) {
