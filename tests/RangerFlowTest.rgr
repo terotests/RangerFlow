@@ -7943,6 +7943,16 @@ class RangerFlowTest {
         def needs:double (((22.0 * 6.6) * 1.8) + 48.0)
         c.ok(("a named arrow's gap holds its name: " + (to_string named) + " >= " + (to_string needs)) (named >= (needs - 0.5)))
         c.ok(("…and an unnamed one keeps the gap it had: " + (to_string unnamed)) ((unnamed < named) && (unnamed >= 100.0)))
+        ; A decision's "yes" and "no" turn in their gap, with the line
+        ; back to the loop's start in it too: each name needs a level
+        ; stretch of its own line one side of the turn, not the plain gap.
+        def dd:MermaidDiagram (MermaidReader.parse("flowchart LR\n  A((Start)) --> B[Plan the trip]\n  B --> C{Budget ok?}\n  C -->|yes| D[Book flights]\n  C -->|no| E[Save more]\n  E --> B\n  D --> F((Finish))\n"))
+        def dg:FlowGraph (MermaidFlow.styled(dd gst))
+        def dc:FlowNode (dg.nodeById("C"))
+        def de:FlowNode (dg.nodeById("E"))
+        def turnGap:double (de.x - (dc.x + dc.width))
+        def turnNeeds:double ((((3.0 * 6.6) * 1.8) + 30.0) * 2.0)
+        c.ok(("a turning name has a stretch of its own line: " + (to_string turnGap) + " >= " + (to_string turnNeeds)) (turnGap >= turnNeeds))
         def frameRole:string ""
         def lineRole:string ""
         for qbig.items qit:SceneItem qi {
