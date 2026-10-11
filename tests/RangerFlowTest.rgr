@@ -2906,6 +2906,10 @@ class RangerFlowTest {
         c.ok("a person's head is inside it" (FlowShapes.holds(body 80.0 32.0)))
         c.ok("so are its shoulders" (FlowShapes.holds(body 80.0 92.0)))
         c.ok("the corner beside the head is not" ((FlowShapes.holds(body 14.0 26.0)) == false))
+        ; The head is a round head, not a blob as wide as the body: there is
+        ; room beside it, and beside the neck under it.
+        c.ok("the head is well inside the width" ((FlowShapes.holds(body 50.0 37.0)) == false))
+        c.ok("and the neck is pinched under it" ((FlowShapes.holds(body 70.0 55.0)) == false))
         c.eqInt("and it needs no ornament to be a person" (FlowShapes.ornamentCount("person")) 0)
         c.eqInt("a C4 figure does, because its head is drawn apart" (FlowShapes.ornamentCount("c4person")) 1)
         c.ok("a filled one" (FlowShapes.ornamentClosed("c4person" 0)))

@@ -669,18 +669,30 @@ class FlowShapes {
             return pts
         }
         if (shape == "person") {
-            ; Head and shoulders, as one silhouette rather than a circle
-            ; floating over a box — which is how D2 draws it, and how a
-            ; reader recognises a person at the size a node is. The head is
-            ; about three quarters of the width and reaches a little past
-            ; half the height; the shoulders run out to the full width.
-            def headRx:double (w * 0.37)
-            def headRy:double (h * 0.3)
-            def shoulderRx:double (w * 0.28)
-            def shoulderRy:double (h * 0.42)
-            FlowShapes.ellipseArcInto(pts (x + shoulderRx) b shoulderRx shoulderRy 180.0 270.0 8)
-            FlowShapes.ellipseArcInto(pts cx (y + headRy) headRx headRy 160.0 380.0 20)
-            FlowShapes.ellipseArcInto(pts (r - shoulderRx) b shoulderRx shoulderRy 270.0 360.0 8)
+            ; Head and shoulders as one silhouette, the way a "user" icon is
+            ; drawn: a round head well inside the width, a short pinched neck,
+            ; and sloping shoulders — the top of an ellipse as wide as the
+            ; box — over a body that carries the label. The head is a circle
+            ; whatever the box's aspect: an ellipse as wide as the body reads
+            ; as a blob, not a person.
+            def hr:double (FlowShapes.personHead(w h))
+            def hcy:double (y + hr)
+            def nw:double (hr * 0.3)
+            def sy:double (FlowShapes.personShoulders(w h y))
+            def srx:double (w * 0.5)
+            def sry:double ((b - sy) * 0.7)
+            if (sry > (w * 0.36)) { sry = (w * 0.36) }
+            ; Where the neck meets the shoulders and the head: the angles on
+            ; each whose x is half a neck from the middle.
+            def sa:double ((asin (nw / srx)) * 57.29577951308232)
+            def na:double ((asin (nw / hr)) * 57.29577951308232)
+            push pts x
+            push pts b
+            FlowShapes.ellipseArcInto(pts cx (sy + sry) srx sry 180.0 (270.0 - sa) 16)
+            FlowShapes.arcInto(pts cx hcy hr (90.0 + na) (450.0 - na) 28)
+            FlowShapes.ellipseArcInto(pts cx (sy + sry) srx sry (270.0 + sa) 360.0 16)
+            push pts r
+            push pts b
             return pts
         }
         if (shape == "c4person") {
@@ -978,6 +990,20 @@ class FlowShapes {
         def ry:double (FlowShapes.drumRadius(h))
         FlowShapes.halfEllipseInto(pts (x + (w * 0.5)) (y + ry) (w * 0.5) ry false 14)
         return pts
+    }
+
+    ; A person's head: a circle, a fifth of the box at most either way, so
+    ; there is always a body under it to write the label on.
+    sfn personHead:double (w:double h:double) {
+        def hr:double (h * 0.21)
+        if (hr > (w * 0.19)) { hr = (w * 0.19) }
+        return hr
+    }
+
+    ; Where a person's shoulders start: under the head and a short neck.
+    sfn personShoulders:double (w:double h:double y:double) {
+        def hr:double (FlowShapes.personHead(w h))
+        return (y + (hr * 2.12))
     }
 
     ; --------------------------------------------------------------- arcs ----
@@ -1378,7 +1404,8 @@ class FlowShapes {
         ; A figure's text goes on the body, under the head — the head is not
         ; part of the box you write in.
         if (shape == "person") {
-            return (y + (h * 0.8))
+            def sy:double (FlowShapes.personShoulders(w h y))
+            return (sy + (((y + h) - sy) * 0.55))
         }
         if (shape == "c4person") {
             def hr2:double (FlowShapes.headRadius(w h))
