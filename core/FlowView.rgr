@@ -2237,6 +2237,11 @@ class FlowView {
         if (n.shape == "document") {
             tall = (h - ((FlowShapes.waveDepth(h)) * 2.0))
         }
+        ; A person is written on below the shoulders: text allowed the whole
+        ; box grows up over the neck and the head.
+        if (n.shape == "person") {
+            tall = (((h - (FlowShapes.personShoulders(w h 0.0))) * 0.8))
+        }
         if (room < (this.sl(20.0))) {
             room = (this.sl(20.0))
         }
