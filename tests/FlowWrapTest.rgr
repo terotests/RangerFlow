@@ -112,12 +112,17 @@ class FlowWrapTest {
         def e:int 0
         while (e < (g.edgeCount())) {
             def ed:FlowEdge (g.edgeAt(e))
-            if ((((array_length ed.waypoints) >= 4) && (ed.sourceHandle >= 0)) || ed.hasLaneX) {
+            def sn:FlowNode (g.nodeById(ed.source))
+            def tn:FlowNode (g.nodeById(ed.target))
+            ; a link down within one column keeps the ends the layout gave
+            ; it and is left to the router, as before the wrap
+            def keptDown:boolean ((((array_length ed.waypoints) == 0) && ((fabs (sn.x - tn.x)) < (wrap.gW + 1.0))) && (tn.y > (sn.y + sn.height)))
+            if (((((array_length ed.waypoints) >= 4) && (ed.sourceHandle >= 0)) || ed.hasLaneX) || keptDown) {
                 routed = (routed + 1)
             }
             e = (e + 1)
         }
-        this.ok((routed == (g.edgeCount())) "every edge is routed again")
+        this.ok((routed == (g.edgeCount())) "every edge is routed again or kept as the layout drew it")
         ; the scene still draws, with every node and edge tagged
         def sc:FlowScene (MermaidRender.sceneWrapped((FlowWrapTest.straight()) "default" 0.0 20.0 1.5))
         this.ok(((sc.worldW / sc.worldH) > 0.5) ("the wrapped scene is a block: " + (to_string sc.worldW) + "x" + (to_string sc.worldH)))
@@ -329,6 +334,49 @@ class FlowWrapTest {
         this.ok(((s0.worldW == s1.worldW) && (s0.worldH == s1.worldH)) "a sequence diagram is not cut")
     }
 
+    ; A fork and its merge inside one column of a wrapped flow (Tero's
+    ; "GPU-backend" slide): the column moves over as one, so each link down
+    ; in it keeps the side and the spread the layout gave its ends. Routed
+    ; again centre to centre, the merge's three lines came into the middle
+    ; of the box's top on each other, and the fork's left ends the layout
+    ; spread along the diamond for lines that started from its tip.
+    fn forkMergeKeepTheirEnds:void () {
+        def text:string "flowchart TB\n  U[UIX TypeScript, CErXes] -->|import mfiles:three@1| F[Julkisivu: Three-API, kevyt JS]\n  F -->|komentopuskuri kerran per frame| M[3D-moduuli WASM: scene graph, glTF, renderöijä]\n  M --> G{GPU-backend}\n  G --> W1[WebGPU]\n  G --> W2[WebGL2]\n  G --> W3[Ohjelmisto]\n  W1 & W2 & W3 --> S[Surface ikkunan alueella]\n"
+        def st:FlowStyle (FlowStyle.named("default"))
+        st.textFill = 1.8
+        def laid:FlowGraph (MermaidRender.drawWith(text st (new FlowLayoutMemo))).graph
+        def g:FlowGraph (MermaidRender.drawWith(text st (new FlowLayoutMemo))).graph
+        def wrap (new FlowWrap())
+        this.ok((wrap.applyFlow(g 2.4 4)) "the flow is cut into columns")
+        def gn:FlowNode (g.nodeById("G"))
+        def sn:FlowNode (g.nodeById("S"))
+        this.ok(((fabs ((gn.x + (gn.width * 0.5)) - (sn.x + (sn.width * 0.5)))) < 1.0) "the fork and its merge share a column")
+        def ends:[string]
+        def e:int 0
+        while (e < (g.edgeCount())) {
+            def ed:FlowEdge (g.edgeAt(e))
+            def was:FlowEdge (laid.edgeAt(e))
+            if ((ed.source == "G") || (ed.target == "S")) {
+                def what:string (ed.source + "->" + ed.target)
+                this.ok(((array_length ed.waypoints) == 0) (what + " is left to the router, as laid out"))
+                this.ok(((ed.sourceHandle == was.sourceHandle) && (ed.targetHandle == was.targetHandle)) (what + " leaves and enters on the sides it had"))
+                this.ok(((ed.portNudgeSource == was.portNudgeSource) && (ed.portNudgeTarget == was.portNudgeTarget)) (what + " keeps its ends' spread"))
+            }
+            if (ed.target == "S") {
+                def end:string ((to_string ed.targetHandle) + ":" + (to_string ed.portNudgeTarget))
+                def seen:boolean false
+                for ends k:string ki {
+                    if (k == end) { seen = true }
+                }
+                this.ok((! seen) (ed.source + " comes into the merge at its own point, " + end))
+                push ends end
+            }
+            e = (e + 1)
+        }
+        this.ok(((array_length ends) == 3) "three lines into the merge")
+        this.ok(((EdgeOverlap.nodeCrossings(g)) == 0) "no line goes through a box")
+    }
+
     sfn mn:double (a:double b:double) {
         if (a < b) { return a }
         return b
@@ -341,6 +389,7 @@ class FlowWrapTest {
         t.rows()
         t.loopOutside()
         t.plantUmlActivity()
+        t.forkMergeKeepTheirEnds()
         print ((to_string t.passes) + " passed, " + (to_string t.fails) + " failed")
     }
 }
