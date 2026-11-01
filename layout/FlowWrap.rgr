@@ -606,9 +606,12 @@ class FlowWrap {
                     ed.hasLaneX = true
                 } {
                 if ((ca == cb) && ((b.y - (a.y + a.height)) > 1.0)) {
-                    ; down, same column
-                    def mid:double (((a.y + a.height) + b.y) * 0.5)
-                    FlowWrap.route(ed ([] _:double (acx (a.y + a.height) acx mid bcx mid bcx b.y)) 2 0)
+                    ; down, same column, a link the layout left to the
+                    ; router: its ends moved over with the column, so they
+                    ; are kept as the layout set them — side and spread
+                    ; along it. Routed again centre to centre, a fork's
+                    ; lines left the spread ends they kept and a merge's
+                    ; all came into the middle of one side, on each other.
                 } {
                     if (ca == cb) {
                         ; up or level, same column: round the right-hand side
